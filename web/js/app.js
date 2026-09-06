@@ -90,6 +90,7 @@ function aplicarEstado(e) {
 function actualizarControles() {
   const lider = puedeMover() && conectado && modo !== 'libre';
   $('#controles-lider').hidden = !lider;
+  document.body.classList.toggle('con-barra', puedeMover() && conectado); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
   $('#btn-volver').hidden = modo !== 'libre';
   const p = $('#vivo-modo');
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');

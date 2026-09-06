@@ -74,8 +74,8 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 
 #nota-panel{position:fixed;left:.6rem;right:.6rem;bottom:calc(.8rem + env(safe-area-inset-bottom));background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:.8rem;z-index:20}
 .nota-cab{font-size:.8rem;color:var(--tenue);margin-bottom:.4rem}
-.franja{position:sticky;top:0;z-index:9;display:block;width:100%;background:var(--acorde);color:#000;border:0;border-radius:0;padding:.7rem .8rem;font-size:.95rem;text-align:center}
-.franja b{font-weight:800}
+.flotante{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(1.2rem + env(safe-area-inset-bottom));background:var(--acorde);color:#000;font-weight:800;border:0;border-radius:999px;padding:.8rem 1.2rem;box-shadow:0 4px 18px rgba(0,0,0,.6);z-index:16;white-space:nowrap}
+body.con-barra .flotante{bottom:calc(7.4rem + env(safe-area-inset-bottom))}
 #controles-lider{position:fixed;left:0;right:0;bottom:0;display:flex;gap:.4rem;padding:.5rem .6rem calc(.6rem + env(safe-area-inset-bottom));background:rgba(0,0,0,.9);border-top:1px solid var(--borde);z-index:15}
 #controles-lider button{flex:1;padding:.9rem .4rem;font-weight:700;font-size:1rem}
 #lider-pasar{background:var(--azul);border-color:var(--azul)}
