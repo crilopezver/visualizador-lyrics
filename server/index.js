@@ -68,8 +68,14 @@ const servidor = http.createServer(async (req, res) => {
         if (rol !== 'director') return json(res, 403, { error: 'solo el director edita canciones' });
         const cuerpo = await leerCuerpo(req);
         if (typeof cuerpo.cho !== 'string') return json(res, 400, { error: 'falta cho' });
-        if (req.method === 'POST') return json(res, 201, { id: almacen.crearCancion(cuerpo.cho) });
-        if (req.method === 'PUT' && id) { almacen.guardarCancion(id, cuerpo.cho); return json(res, 200, { id }); }
+        if (req.method === 'POST') { const nuevo = almacen.crearCancion(cuerpo.cho); avisarCancion(nuevo); return json(res, 201, { id: nuevo }); }
+        if (req.method === 'PUT' && id) { almacen.guardarCancion(id, cuerpo.cho); avisarCancion(id); return json(res, 200, { id }); }
+      }
+      if (rec === 'secciones') {
+        // nombres de sección en uso en todo el repertorio (para reutilizarlos al marcar secciones)
+        const nombres = new Set();
+        for (const c of almacen.indiceCanciones()) { const cho = almacen.leerCancion(c.id) || ''; for (const m of cho.matchAll(/^\{\s*secci[oó]n\s*:\s*(.+?)\s*\}\s*$/gim)) if (m[1]) nombres.add(m[1]); }
+        return json(res, 200, [...nombres].sort((a, b) => a.localeCompare(b)));
       }
       if (rec === 'setlists') {
         if (req.method === 'GET' && !id) return json(res, 200, almacen.indiceSetlists());
@@ -100,6 +106,10 @@ const servidor = http.createServer(async (req, res) => {
 
 // ---------- WebSocket: sincronía en vivo ----------
 const wss = new WebSocketServer({ server: servidor, path: '/ws' });
+function avisarCancion(id) { // una canción cambió en disco: los clientes descartan su copia
+  const m = JSON.stringify({ tipo: 'cancion-cambiada', id });
+  for (const c of wss.clients) if (c.readyState === 1) c.send(m);
+}
 function difundir() {
   const m = JSON.stringify({ tipo: 'estado', estado: estado.snapshot() });
   for (const c of wss.clients) if (c.readyState === 1) c.send(m);

@@ -32,6 +32,7 @@
     <div id="vivo-cabecera">
       <div id="vivo-titulo">Nada en vivo todavía</div>
       <div id="vivo-sub"></div>
+      <div id="vivo-sigue" class="sigue-cab"></div>
       <div id="vivo-herr">
         <span id="vivo-modo" class="pill modo-siguiendo">siguiendo al vivo</span>
         <label class="ctl" id="ctl-tono">Tono <button id="tr-menos">−</button><span id="tr-valor">0</span><button id="tr-mas">+</button> <span id="vivo-tono-info"></span></label>
@@ -39,6 +40,7 @@
         <label class="ctl" id="ctl-cejilla">Cejilla <button id="cj-menos">−</button><span id="cj-valor">0</span><button id="cj-mas">+</button></label>
         <label class="ctl">Letra <button id="tam-menos">A−</button><button id="tam-mas">A+</button></label>
         <button id="btn-nota" class="ctl-btn" title="Mi nota personal">✎ Mi nota</button>
+        <button id="btn-editar" class="ctl-btn" hidden title="Secciones, arreglo y partes (director)">✎ Estructura</button>
       </div>
     </div>
     <article id="cancion"></article>
@@ -68,6 +70,7 @@
   <!-- BIBLIOTECA -->
   <section id="vista-biblioteca" class="vista">
     <input id="buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
+    <div id="bib-director" class="fila" hidden><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></div>
     <div id="bib-info" class="vacio"></div>
     <ul id="lista-canciones" class="lista"></ul>
   </section>
@@ -84,6 +87,42 @@
         <button id="setlist-cerrar">Cerrar</button>
       </div>
     </div>
+  </section>
+
+  <!-- EDITOR DE ESTRUCTURA (director) -->
+  <section id="vista-editor" class="vista">
+    <h2>Estructura <small id="ed-titulo"></small></h2>
+    <div class="fila"><button id="ed-volver" class="primario">◀ Volver al vivo</button></div>
+
+    <h3>1 · Secciones</h3>
+    <p class="ayuda">Toca la primera línea del tramo y luego la última; después ponle nombre. Los nombres que ya usaste aparecen como sugerencia.</p>
+    <div id="ed-sel-barra" class="fila" hidden>
+      <input id="ed-nombre" list="ed-nombres" placeholder="Nombre de la sección (Intro, Coro, Estrofa 1…)" autocomplete="off">
+      <datalist id="ed-nombres"></datalist>
+      <button id="ed-definir" class="primario">Definir sección</button>
+      <button id="ed-cancelar">Cancelar</button>
+    </div>
+    <ol id="ed-lineas" class="ed-lineas"></ol>
+
+    <h3>2 · Arreglo <small>orden en que se toca</small></h3>
+    <p class="ayuda">Toca una ficha para agregarla al final del arreglo. Repite las que se repiten. Sin arreglo, la canción se muestra en su orden natural.</p>
+    <div id="ed-chips" class="chips"></div>
+    <ol id="ed-arreglo-lista" class="lista"></ol>
+    <div class="fila"><button id="ed-arreglo-guardar" class="primario">Guardar arreglo</button><button id="ed-arreglo-quitar" class="peligro">Quitar arreglo</button></div>
+
+    <h3>3 · Partes de otras canciones y bloques <small>mixes y transiciones</small></h3>
+    <p class="ayuda">Una parte trae una sección de otra canción del repertorio (la original no se toca). Un bloque es texto propio: dinámica, impro, transición.</p>
+    <div class="fila">
+      <select id="ed-parte-cancion"><option value="">Canción…</option></select>
+      <select id="ed-parte-seccion"><option value="">Sección…</option></select>
+      <button id="ed-parte-agregar">+ Agregar parte</button>
+    </div>
+    <div class="fila">
+      <input id="ed-bloque-titulo" placeholder="Título del bloque (ej. Dinámica sorteo)">
+    </div>
+    <textarea id="ed-bloque-texto" rows="3" placeholder="Texto del bloque. Puedes poner acordes entre corchetes: [Dm] [G] [C] 32 compases"></textarea>
+    <div class="fila"><button id="ed-bloque-agregar">+ Agregar bloque</button></div>
+    <ol id="ed-partes-lista" class="lista"></ol>
   </section>
 
   <!-- AJUSTES / PERFIL -->

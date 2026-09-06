@@ -13,6 +13,7 @@ export function parsear(cho) {
     if (m) {
       const k = m[1].toLowerCase(), v = m[2];
       if (k === 'seccion' || k === 'sección') nueva(v);
+      else if (k === 'parte') { const [id, sec] = v.split('|').map(x => x.trim()); nueva(sec || ''); actual.parte = { id, seccion: sec || '' }; }
       else if (k === 'nota' || k === 'comentario' || k === 'c') { if (!actual) nueva(''); actual.lineas.push({ tipo: 'nota', texto: v }); }
       else meta[k] = v;
       continue;
@@ -34,6 +35,37 @@ export function parsear(cho) {
     actual.lineas.push({ tipo: soloAcordes ? 'acordes' : 'letra', segs, rep });
   }
   return { meta, secciones };
+}
+
+// --- expandir: resuelve partes de otras canciones (mixes) y aplica el arreglo (orden con repeticiones) ---
+// resolverParte(id, nombreSeccion) devuelve { nombre, lineas, titulo, tono } o null. Debe ser síncrono (las canciones ya cargadas).
+export function nombresArreglo(cancion) {
+  return String(cancion.meta.arreglo || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+export function expandir(cancion, resolverParte = () => null) {
+  const base = cancion.secciones.map(s => {
+    if (!s.parte) return { ...s };
+    const r = resolverParte(s.parte.id, s.parte.seccion);
+    if (r) return { nombre: r.nombre || s.parte.seccion, lineas: r.lineas, origen: { id: s.parte.id, titulo: r.titulo, tono: r.tono } };
+    return { nombre: s.parte.seccion, lineas: [{ tipo: 'nota', texto: `No encontré la sección "${s.parte.seccion}" en la canción "${s.parte.id}"` }], origen: { id: s.parte.id, titulo: s.parte.id, tono: '' } };
+  });
+  const arreglo = nombresArreglo(cancion);
+  if (!arreglo.length) return base;
+  const veces = {}; const out = [];
+  for (const nombre of arreglo) {
+    const s = base.find(x => (x.nombre || '').trim().toLowerCase() === nombre.toLowerCase());
+    if (!s) { out.push({ nombre, lineas: [{ tipo: 'nota', texto: 'esta sección no existe en la canción' }] }); continue; }
+    veces[nombre.toLowerCase()] = (veces[nombre.toLowerCase()] || 0) + 1;
+    out.push({ ...s, vez: veces[nombre.toLowerCase()] });
+  }
+  return out;
+}
+const ORDINAL = n => n === 1 ? '' : `${n}ª vez`;
+export function tituloSeccion(s, i) {
+  const partes = [s.nombre || `Sección ${i + 1}`];
+  if (s.vez > 1) partes.push(ORDINAL(s.vez));
+  if (s.origen) partes.push(s.origen.titulo + (s.origen.tono ? ` · tono ${s.origen.tono}` : ''));
+  return partes.join(' · ');
 }
 
 // --- transposición ---
@@ -84,26 +116,27 @@ function renderLinea(segs, desplazamiento, bemoles) {
 
 export function renderCancion(cancion, opts = {}) {
   const { transp = 0, cejilla = 0, vista = 'acordes', seccionActual = 0 } = opts;
+  const secciones = opts.secciones || cancion.secciones;
   const bemoles = TONOS_BEMOL.has(tonoTranspuesto(cancion.meta.tono || '', transp - cejilla));
   const desplazamiento = transp - cejilla; // lo que ve el guitarrista con cejilla
   if (vista === 'estructura') {
-    const items = cancion.secciones.map((s, i) => {
+    const items = secciones.map((s, i) => {
       const acs = []; let reps = '';
       for (const l of s.lineas) { if (l.segs) for (const g of l.segs) if (g.acorde) acs.push(transponerAcorde(g.acorde, desplazamiento, bemoles)); if (l.rep) reps = l.rep; }
       const notas = s.lineas.filter(l => l.tipo === 'nota').map(l => `<div class="nota">${esc(l.texto)}</div>`).join('');
       const unicos = [...new Set(acs)].slice(0, 8).join(' ');
-      return `<li class="${i === seccionActual ? 'actual' : ''}" data-sec="${i}"><div><div>${esc(s.nombre || 'Sección ' + (i + 1))}${reps ? `<span class="rep">${esc(reps)}</span>` : ''}</div>${notas}</div><div class="acs">${esc(unicos)}</div></li>`;
+      return `<li class="${i === seccionActual ? 'actual' : ''}" data-sec="${i}"><div><div>${esc(tituloSeccion(s, i))}${reps ? `<span class="rep">${esc(reps)}</span>` : ''}</div>${notas}</div><div class="acs">${esc(unicos)}</div></li>`;
     });
     return `<ol class="estructura">${items.join('')}</ol>`;
   }
-  return cancion.secciones.map((s, i) => {
+  return secciones.map((s, i) => {
     const lineas = s.lineas.map(l => {
       if (l.tipo === 'vacia') return '<div class="linea">&nbsp;</div>';
       if (l.tipo === 'nota') return `<div class="nota">${esc(l.texto)}</div>`;
       const html = renderLinea(l.segs, desplazamiento, bemoles);
       return `<div class="linea ${l.tipo === 'acordes' ? 'solo-acordes' : ''}">${html}${l.rep ? `<span class="rep">(${esc(l.rep)})</span>` : ''}</div>`;
     }).join('');
-    const nombre = s.nombre ? `<div class="nombre">${esc(s.nombre)}</div>` : '';
+    const nombre = (s.nombre || s.vez > 1 || s.origen) ? `<div class="nombre">${esc(tituloSeccion(s, i))}</div>` : '';
     return `<div class="seccion ${i === seccionActual ? 'actual' : ''}" data-sec="${i}">${nombre}${lineas}</div>`;
   }).join('');
 }

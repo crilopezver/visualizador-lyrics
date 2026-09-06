@@ -1,5 +1,5 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
-import { parsear, renderCancion, tonoTranspuesto } from './chordpro.js';
+import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion } from './chordpro.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -59,6 +59,7 @@ function conectar() {
     if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; actualizarConexion(); aplicarEstado(m.estado); }
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
     else if (m.tipo === 'rechazado') aviso('sin permiso');
+    else if (m.tipo === 'cancion-cambiada') cancionCambiada(m.id);
   };
   ws.onclose = () => { conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
@@ -132,12 +133,13 @@ function scrollDePosicion(seccion, frac) {
 async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
   if (!id) return vaciarVivo();
   try {
-    if (mostrando.id !== id) {
+    if (mostrando.id !== id || !mostrando.expandidas) {
       const cho = await obtenerCho(id);
+      if (mostrando.id !== id) cerrarNota();
       mostrando.id = id; mostrando.cancion = parsear(cho);
-      cerrarNota();
+      mostrando.expandidas = await expandirConPartes(mostrando.cancion);
     }
-    mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.cancion.secciones.length - 1));
+    mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.expandidas.length - 1));
     mostrando.frac = frac;
     if (mostrando.pintadoId !== id) pintar(); else marcarSeccion(mostrando.seccion);
     if (desplazar) { void $('#cancion').offsetHeight; /* fuerza layout */ scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)); }
@@ -152,6 +154,18 @@ function scrollA(top) {
 window.addEventListener('scrollend', () => { scrollProgramatico = false; }, { passive: true });
 for (const ev of ['pointerdown', 'touchmove', 'wheel', 'keydown']) window.addEventListener(ev, () => { ultimoGesto = Date.now(); }, { passive: true });
 const scrollDelUsuario = () => !scrollProgramatico && (Date.now() - ultimoGesto) < 1500;
+// Trae las canciones referenciadas por {parte:} y devuelve las secciones expandidas (arreglo aplicado)
+async function expandirConPartes(cancion) {
+  const ids = [...new Set(cancion.secciones.filter(s => s.parte).map(s => s.parte.id))];
+  const parseadas = new Map();
+  for (const pid of ids) { try { parseadas.set(pid, parsear(await obtenerCho(pid))); } catch { parseadas.set(pid, null); } }
+  return expandir(cancion, (pid, nombre) => {
+    const c = parseadas.get(pid); if (!c) return null;
+    const sec = c.secciones.find(x => (x.nombre || '').trim().toLowerCase() === (nombre || '').trim().toLowerCase());
+    if (!sec) return null;
+    return { nombre: sec.nombre, lineas: sec.lineas, titulo: c.meta.titulo || titulo(pid), tono: c.meta.tono || '' };
+  });
+}
 function marcarSeccion(i) { $$('#cancion [data-sec]').forEach(el => el.classList.toggle('actual', Number(el.dataset.sec) === i)); }
 const transpBanda = id => (estado.tonos && estado.tonos[id]) || 0;   // tono de la banda: lo fija el director, lo ven todos
 const cejillaPersonal = id => (perfil.cejilla || perfil.instrumento === 'guitarra') ? (prefs.cejilla[id] ?? 0) : 0;
@@ -169,7 +183,14 @@ function pintar() {
   mostrando.pintadoId = id;
   const art = $('#cancion');
   art.className = 'vista-' + perfil.vista;
-  art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: mostrando.seccion });
+  art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: mostrando.seccion, secciones: mostrando.expandidas });
+  // cuál sigue
+  const sig = estado.siguiente[0];
+  $('#vivo-sigue').textContent = sig ? `Sigue: ${titulo(sig)}` : '';
+  art.insertAdjacentHTML('beforeend', sig
+    ? `<div class="sigue-card">Sigue<b>${esc(titulo(sig))}${artista(sig) ? ' · ' + esc(artista(sig)) : ''}</b>${puedeMover() ? '<button class="btn-pasar">▶▶ Pasar a esta canción</button>' : ''}</div>`
+    : `<div class="sigue-card">Fin de la cola${puedeMover() ? '<b>Agrega canciones en “Canciones” o carga un setlist</b>' : ''}</div>`);
+  $('#btn-editar').hidden = rol !== 'director';
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 }
 // Navegación por páginas (estilo lector): avanza ~80 % de la pantalla. La sincronía viaja como sección + fracción.
@@ -215,7 +236,9 @@ document.addEventListener('keydown', ev => {
 });
 let toque = null;
 $('#cancion').addEventListener('pointerdown', e => { toque = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+$('#cancion').addEventListener('click', e => { if (e.target.closest('.btn-pasar')) { e.stopPropagation(); enviar({ tipo: 'siguiente', accion: 'pasar' }); } });
 $('#cancion').addEventListener('pointerup', e => {
+  if (e.target.closest('.btn-pasar')) { toque = null; return; }
   if (!toque) return; const dx = Math.abs(e.clientX - toque.x), dy = Math.abs(e.clientY - toque.y), dt = Date.now() - toque.t; toque = null;
   if (dx > 10 || dy > 10 || dt > 400) return; // fue un desplazamiento, no un toque
   const sec = e.target.closest('[data-sec]');
@@ -266,6 +289,17 @@ $('#btn-nota').onclick = () => $('#nota-panel').hidden ? abrirNota() : cerrarNot
 $('#nota-cerrar').onclick = cerrarNota;
 $('#nota-guardar').onclick = async () => { try { await api(`/api/notas/${encodeURIComponent(perfil.nombre)}/${mostrando.id}`, { method: 'PUT', body: JSON.stringify({ texto: $('#nota-texto').value }) }); aviso('nota guardada'); cerrarNota(); } catch (e) { aviso('no se guardó: ' + e.message); } };
 
+async function cancionCambiada(id) {
+  cacheCho.delete(id);
+  try { indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca(); } catch {}
+  if (mostrando.id === id || (mostrando.cancion && mostrando.cancion.secciones.some(s => s.parte && s.parte.id === id))) {
+    const y = window.scrollY; mostrando.expandidas = null; mostrando.pintadoId = null;
+    await mostrar(mostrando.id, mostrando.seccion, { frac: mostrando.frac, desplazar: false });
+    scrollA(y);
+  }
+  if (editor.id === id && $('#vista-editor').classList.contains('activa')) await renderEditor();
+}
+
 // ---------- siguiente (cola) ----------
 function renderSiguiente() {
   const ol = $('#lista-siguiente'); ol.innerHTML = '';
@@ -294,12 +328,14 @@ function renderBiblioteca() {
   const q = norm($('#buscar').value.trim());
   const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q));
   $('#bib-info').textContent = `${lista.length} de ${indice.length} canciones`;
+  $('#bib-director').hidden = rol !== 'director';
   const ul = $('#lista-canciones'); ul.innerHTML = '';
   for (const c of lista.slice(0, 300)) {
     const li = document.createElement('li'); if (c.id === estado.vivo.cancion) li.classList.add('en-vivo');
-    li.innerHTML = `<div class="info"><div class="t">${esc(c.titulo)}</div><div class="s">${esc([c.artista, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
+    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(c.id)));
+    if (rol === 'director') acc.append(boton('✎', () => abrirEditor(c.id)));
     if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id }); aviso('agregada a Siguiente'); }));
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: c.id }); irA('vivo'); }, 'primario'));
     ul.append(li);
@@ -362,6 +398,153 @@ async function cargarInfo() {
     $('#info-servidor').innerHTML = `Servidor v${esc(i.version)} · datos: ${esc(i.datos)}${i.ejemplo ? ' <b>(datos de ejemplo, no los reales)</b>' : ''}<br>Direcciones para los demás: ${i.ips.map(x => `<b>http://${x.ip}:${i.puerto}</b>`).join(' · ')}`;
   } catch { $('#info-servidor').textContent = 'Sin conexión con el servidor.'; }
 }
+
+// ---------- editor de estructura (director) ----------
+const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [] };
+const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
+const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo)\s*:/i;
+const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
+const RE_PARTE = /^\{\s*parte\s*:\s*(.*?)\s*\}\s*$/i;
+const RE_ARREGLO = /^\{\s*arreglo\s*:.*\}\s*$/im;
+async function abrirEditor(id) {
+  if (rol !== 'director') return aviso('solo el director');
+  editor.id = id; editor.selIni = editor.selFin = null;
+  if (mostrando.id !== id) { modo = 'libre'; actualizarControles(); await mostrar(id, 0, { desplazar: false }); }
+  await renderEditor(); irA('editor'); window.scrollTo({ top: 0 });
+}
+async function guardarEditor(cho) {
+  editor.cho = cho;
+  await api(`/api/canciones/${editor.id}`, { method: 'PUT', body: JSON.stringify({ cho }) });
+  cacheCho.set(editor.id, cho); // el aviso del servidor repinta el vivo en todos
+}
+function lineasCuerpo() { return editor.cho.replace(/\r/g, '').split('\n'); }
+async function renderEditor() {
+  editor.cho = await obtenerCho(editor.id);
+  const c = parsear(editor.cho);
+  $('#ed-titulo').textContent = c.meta.titulo || editor.id;
+  // 1 · líneas
+  const ol = $('#ed-lineas'); ol.innerHTML = '';
+  const lineas = lineasCuerpo();
+  lineas.forEach((l, i) => {
+    if (META_CAB.test(l)) return;
+    const li = document.createElement('li'); li.dataset.i = i;
+    let m;
+    if ((m = l.match(RE_SEC))) {
+      li.className = 'ed-sec'; li.innerHTML = `<span class="txt">${esc(m[1] || 'sección sin nombre')}</span>`;
+      li.append(boton('✎', async () => { const n = prompt('Nombre de la sección:', m[1]); if (n === null) return; lineas[i] = `{seccion: ${n.trim()}}`; await guardarEditor(lineas.join('\n')); renderEditor(); }));
+      li.append(boton('✕', async () => { if (!confirm('¿Quitar la marca de sección? La letra se conserva.')) return; lineas.splice(i, 1); await guardarEditor(lineas.join('\n')); renderEditor(); }));
+    } else if ((m = l.match(RE_PARTE))) {
+      const [pid, sec] = m[1].split('|').map(x => x.trim());
+      li.className = 'ed-parte'; li.innerHTML = `<span class="txt">↪ ${esc(sec)} · ${esc(titulo(pid))}</span>`;
+      li.append(boton('✕', async () => { lineas.splice(i, 1); await guardarEditor(lineas.join('\n')); renderEditor(); }));
+    } else {
+      if (!l.trim()) li.classList.add('vacia');
+      li.innerHTML = `<span class="txt">${l.trim() ? esc(l).replace(/\[([^\]]+)\]/g, '<span class="ac-in">[$1]</span>') : '(línea vacía)'}</span>`;
+      if (editor.selIni !== null && editor.selFin !== null && i >= editor.selIni && i <= editor.selFin) li.classList.add('sel');
+      if (editor.selIni === i) li.classList.add('sel', 'sel-ini');
+      li.onclick = () => seleccionarLinea(i);
+    }
+    ol.append(li);
+  });
+  $('#ed-sel-barra').hidden = editor.selIni === null;
+  // nombres sugeridos
+  try { const usados = await api('/api/secciones'); const dl = $('#ed-nombres'); dl.innerHTML = ''; for (const n of [...new Set([...NOMBRES_ESTANDAR, ...usados])]) { const o = document.createElement('option'); o.value = n; dl.append(o); } } catch {}
+  // 2 · arreglo
+  const nombres = [...new Set(c.secciones.map(s => s.nombre || (s.parte && s.parte.seccion) || '').filter(Boolean))];
+  const chips = $('#ed-chips'); chips.innerHTML = '';
+  for (const n of nombres) chips.append(boton(n, () => { editor.arreglo.push(n); renderArreglo(); }));
+  if (!nombres.length) chips.innerHTML = '<span class="ayuda">Primero marca secciones (paso 1).</span>';
+  editor.arreglo = nombresArreglo(c); renderArreglo();
+  // 3 · partes
+  const selC = $('#ed-parte-cancion'); selC.innerHTML = '<option value="">Canción…</option>';
+  for (const x of indice) if (x.id !== editor.id) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.titulo + (x.artista ? ' · ' + x.artista : ''); selC.append(o); }
+  $('#ed-parte-seccion').innerHTML = '<option value="">Sección…</option>';
+  renderPartes(c);
+}
+function seleccionarLinea(i) {
+  if (editor.selIni === null || editor.selFin !== null) { editor.selIni = i; editor.selFin = null; }
+  else { editor.selFin = i; if (editor.selFin < editor.selIni) [editor.selIni, editor.selFin] = [editor.selFin, editor.selIni]; }
+  renderEditor();
+}
+$('#ed-cancelar').onclick = () => { editor.selIni = editor.selFin = null; renderEditor(); };
+$('#ed-definir').onclick = async () => {
+  const nombre = $('#ed-nombre').value.trim(); if (!nombre) return aviso('ponle nombre');
+  const lineas = lineasCuerpo();
+  const ini = editor.selIni; let fin = editor.selFin ?? editor.selIni;
+  // las marcas de sección dentro del tramo se funden en la nueva
+  for (let i = fin; i >= ini; i--) if (RE_SEC.test(lineas[i])) { lineas.splice(i, 1); fin--; }
+  // si lo que sigue al tramo no tiene marca propia, abrir una sección sin nombre para no arrastrarlo
+  let j = fin + 1; while (j < lineas.length && !lineas[j].trim()) j++;
+  if (j < lineas.length && !RE_SEC.test(lineas[j]) && !RE_PARTE.test(lineas[j]) && !META_CAB.test(lineas[j])) lineas.splice(fin + 1, 0, '{seccion: }');
+  lineas.splice(ini, 0, `{seccion: ${nombre}}`);
+  editor.selIni = editor.selFin = null; $('#ed-nombre').value = '';
+  await guardarEditor(lineas.join('\n')); renderEditor();
+};
+function renderArreglo() {
+  const ol = $('#ed-arreglo-lista'); ol.innerHTML = '';
+  editor.arreglo.forEach((n, i) => {
+    const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(n)}</div></div><div class="acc"></div>`;
+    const acc = li.querySelector('.acc');
+    if (i > 0) acc.append(boton('↑', () => { [editor.arreglo[i - 1], editor.arreglo[i]] = [editor.arreglo[i], editor.arreglo[i - 1]]; renderArreglo(); }));
+    acc.append(boton('✕', () => { editor.arreglo.splice(i, 1); renderArreglo(); }));
+    ol.append(li);
+  });
+  if (!editor.arreglo.length) ol.innerHTML = '<li class="vacio">Sin arreglo: se muestra en orden natural.</li>';
+}
+function conArreglo(cho, arreglo) {
+  const linea = arreglo.length ? `{arreglo: ${arreglo.join(', ')}}` : '';
+  if (RE_ARREGLO.test(cho)) return cho.replace(/^\{\s*arreglo\s*:.*\}\s*$\n?/im, linea ? linea + '\n' : '');
+  if (!linea) return cho;
+  return /^\{\s*titulo\s*:.*\}\s*$/im.test(cho) ? cho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1${linea}\n`) : linea + '\n' + cho;
+}
+$('#ed-arreglo-guardar').onclick = async () => { await guardarEditor(conArreglo(editor.cho, editor.arreglo)); aviso('arreglo guardado'); renderEditor(); };
+$('#ed-arreglo-quitar').onclick = async () => { editor.arreglo = []; await guardarEditor(conArreglo(editor.cho, [])); renderEditor(); };
+$('#ed-parte-cancion').onchange = async ev => {
+  const sel = $('#ed-parte-seccion'); sel.innerHTML = '<option value="">Sección…</option>';
+  if (!ev.target.value) return;
+  try { const c = parsear(await obtenerCho(ev.target.value)); for (const s of c.secciones) if (s.nombre) { const o = document.createElement('option'); o.value = s.nombre; o.textContent = s.nombre; sel.append(o); } if (sel.options.length === 1) sel.innerHTML = '<option value="">(esa canción no tiene secciones marcadas)</option>'; } catch { aviso('no pude leer esa canción'); }
+};
+$('#ed-parte-agregar').onclick = async () => {
+  const pid = $('#ed-parte-cancion').value, sec = $('#ed-parte-seccion').value; if (!pid || !sec) return aviso('elige canción y sección');
+  await guardarEditor(editor.cho.replace(/\s*$/, '') + `\n\n{parte: ${pid} | ${sec}}\n`); renderEditor();
+};
+$('#ed-bloque-agregar').onclick = async () => {
+  const t = $('#ed-bloque-titulo').value.trim(), tx = $('#ed-bloque-texto').value.trim(); if (!t) return aviso('ponle título al bloque');
+  await guardarEditor(editor.cho.replace(/\s*$/, '') + `\n\n{seccion: ${t}}\n${tx}\n`); $('#ed-bloque-titulo').value = ''; $('#ed-bloque-texto').value = ''; renderEditor();
+};
+function trozos(cho) { // cabecera + trozos que empiezan en {seccion} o {parte}
+  const lineas = cho.replace(/\r/g, '').split('\n'); const cab = []; const ts = []; let actual = null;
+  for (const l of lineas) {
+    if (RE_SEC.test(l) || RE_PARTE.test(l)) { actual = [l]; ts.push(actual); }
+    else if (actual) actual.push(l); else cab.push(l);
+  }
+  return { cab, ts };
+}
+function renderPartes(c) {
+  const ol = $('#ed-partes-lista'); ol.innerHTML = '';
+  const { cab, ts } = trozos(editor.cho);
+  ts.forEach((t, i) => {
+    const m = t[0].match(RE_PARTE); const ms = t[0].match(RE_SEC);
+    const etiqueta = m ? (([pid, sec]) => `↪ ${sec} · ${titulo(pid)}`)(m[1].split('|').map(x => x.trim())) : `${ms[1] || 'sección sin nombre'} · ${t.slice(1).filter(x => x.trim()).length} líneas`;
+    const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(etiqueta)}</div></div><div class="acc"></div>`;
+    const acc = li.querySelector('.acc');
+    if (i > 0) acc.append(boton('↑', async () => { [ts[i - 1], ts[i]] = [ts[i], ts[i - 1]]; await guardarEditor([...cab, ...ts.flat()].join('\n')); renderEditor(); }));
+    acc.append(boton('✕', async () => { if (!confirm('¿Quitar este trozo completo?')) return; ts.splice(i, 1); await guardarEditor([...cab, ...ts.flat()].join('\n')); renderEditor(); }));
+    ol.append(li);
+  });
+}
+$('#ed-volver').onclick = () => { irA('vivo'); };
+$('#btn-editar').onclick = () => { if (mostrando.id) abrirEditor(mostrando.id); };
+async function nuevaCancionEspecial(tipo) {
+  const t = prompt(tipo === 'mix' ? 'Título del mix:' : 'Título del bloque del show:'); if (!t || !t.trim()) return;
+  try {
+    const { id } = await api('/api/canciones', { method: 'POST', body: JSON.stringify({ cho: `{titulo: ${t.trim()}}\n{tipo: ${tipo}}\n{estado: corregida}\n` }) });
+    indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+    await abrirEditor(id);
+  } catch (e) { aviso('no se pudo crear: ' + e.message); }
+}
+$('#btn-nuevo-mix').onclick = () => nuevaCancionEspecial('mix');
+$('#btn-nuevo-bloque').onclick = () => nuevaCancionEspecial('bloque');
 
 // ---------- pantalla encendida, service worker, arranque ----------
 let wakeLock = null;
