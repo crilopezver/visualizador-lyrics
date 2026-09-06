@@ -32,7 +32,7 @@ export class Almacen {
       const id = f.slice(0, -4);
       const cho = fs.readFileSync(path.join(dir, f), 'utf8');
       const meta = this.leerMeta(cho);
-      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '' };
+      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '' };
     });
   }
   leerCancion(id) {

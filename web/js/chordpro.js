@@ -158,15 +158,17 @@ function insertar(acordes, letra) {
 }
 export function textoAChordPro(texto, { titulo = '', artista = '' } = {}) {
   const lineas = texto.replace(/\r/g, '').replace(/\t/g, '        ').split('\n');
-  const meta = { titulo, artista }; const cuerpo = [];
+  const cuerpo = [];
   const noVacias = lineas.filter(l => l.trim());
-  if (!titulo && noVacias[0] && !esLineaAcordes(noVacias[0])) meta.titulo = noVacias[0].trim();
-  if (!artista && noVacias[1] && !esLineaAcordes(noVacias[1]) && !/^\s*(tono|afina|composi|capo)/i.test(noVacias[1])) meta.artista = noVacias[1].trim().replace(/^\(|\)$/g, '');
+  // título y artista tal como vienen en el texto (para no dejarlos como letra), aunque el director los cambie
+  const tituloTexto = noVacias[0] && !esLineaAcordes(noVacias[0]) && !/^\s*\[/.test(noVacias[0]) ? noVacias[0].trim() : '';
+  const artistaTexto = tituloTexto && noVacias[1] && !esLineaAcordes(noVacias[1]) && !/^\s*(tono|afina|composi|capo|\[)/i.test(noVacias[1]) ? noVacias[1].trim().replace(/^\(|\)$/g, '') : '';
+  const meta = { titulo: titulo || tituloTexto, artista: artista || artistaTexto };
   let consumidas = 0;
   for (let i = 0; i < lineas.length; i++) {
     const l = lineas[i].replace(/\(\s*([^()\s]+)\s*\)/g, '($1)'), s = l.trim();
     if (!s) { if (cuerpo.length && cuerpo[cuerpo.length - 1] !== '') cuerpo.push(''); continue; }
-    if (consumidas < 2 && (s === meta.titulo || s.replace(/^\(|\)$/g, '') === meta.artista)) { consumidas++; continue; }
+    if (consumidas < 2 && ((tituloTexto && s === tituloTexto) || (artistaTexto && s.replace(/^\(|\)$/g, '') === artistaTexto))) { consumidas++; continue; }
     let m;
     if ((m = s.match(/^tono\s*:\s*(\S+)/i))) { meta.tono = m[1]; continue; }
     if ((m = s.match(/^(?:capo(?:traste)?|cejilla)\D*(\d+)/i))) { meta.cejilla = m[1]; continue; }

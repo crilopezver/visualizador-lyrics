@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -69,7 +69,7 @@
   <!-- BIBLIOTECA -->
   <section id="vista-biblioteca" class="vista">
     <input id="buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
-    <div id="bib-director" class="fila" hidden style="display:none"><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></div>
+    <div id="bib-director" class="fila" hidden><button id="btn-importar" class="primario">+ Importar canción (pegar)</button><span style="display:none"><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></span></div>
     <div id="bib-info" class="vacio"></div>
     <ul id="lista-canciones" class="lista"></ul>
   </section>
@@ -92,6 +92,7 @@
   <section id="vista-editor" class="vista">
     <h2>Editar canción <small id="ed-titulo"></small></h2>
     <div class="fila"><button id="ed-volver">◀ Volver a Canciones</button></div>
+    <div class="fila"><label class="ctl" style="flex:1;gap:.5rem">Género <select id="ed-genero" style="flex:1"></select></label><input id="ed-genero-nuevo" placeholder="Nuevo género" hidden><button id="ed-genero-ok" hidden>OK</button></div>
 
     <nav class="subtabs"><button data-sub="secciones" class="activa">Secciones</button><button data-sub="acordes">Acordes</button><button data-sub="arreglo">Arreglo original</button></nav>
 
@@ -152,6 +153,25 @@
         <ol id="ed-partes-lista" class="lista"></ol>
       </div>
     </div>
+  </section>
+
+  <!-- IMPORTAR POR PEGADO (director) -->
+  <section id="vista-importar" class="vista">
+    <h2>Importar canción <small>pegar texto</small></h2>
+    <p class="ayuda">Copia la hoja desde Cifra Club (en tono original, sin capo, sin tablaturas), desde un Word, o solo la letra, y pégala aquí. Los acordes que estén en la línea de arriba se pegan a la sílaba que les corresponde.</p>
+    <textarea id="imp-texto" rows="10" placeholder="Pega aquí la canción…"></textarea>
+    <div class="fila">
+      <input id="imp-titulo" placeholder="Título (se detecta solo, puedes corregirlo)">
+      <input id="imp-artista" placeholder="Artista">
+      <input id="imp-tono" placeholder="Tono (G, Am…)" style="max-width:8rem">
+    </div>
+    <div class="fila">
+      <select id="imp-genero"></select>
+      <input id="imp-genero-nuevo" placeholder="Nuevo género" hidden>
+    </div>
+    <div class="fila"><button id="imp-previa">Vista previa</button><button id="imp-guardar" class="primario" disabled>Guardar y corregir acordes</button><button id="imp-cancelar">Cancelar</button></div>
+    <div id="imp-info" class="ayuda"></div>
+    <article id="imp-cancion" class="vista-acordes"></article>
   </section>
 
   <!-- AJUSTES / PERFIL -->

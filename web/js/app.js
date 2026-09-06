@@ -1,5 +1,5 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
-import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion } from './chordpro.js';
+import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro } from './chordpro.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -353,13 +353,13 @@ function boton(txt, fn, clase = '') { const b = document.createElement('button')
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 function renderBiblioteca() {
   const q = norm($('#buscar').value.trim());
-  const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q));
+  const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q) || norm(c.genero).includes(q));
   $('#bib-info').textContent = `${lista.length} de ${indice.length} canciones`;
   $('#bib-director').hidden = rol !== 'director';
   const ul = $('#lista-canciones'); ul.innerHTML = '';
   for (const c of lista.slice(0, 300)) {
     const li = document.createElement('li'); if (c.id === estado.vivo.cancion) li.classList.add('en-vivo');
-    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
+    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.genero, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(c.id)));
     if (rol === 'director') acc.append(boton('✎', () => abrirEditor(c.id)));
@@ -481,6 +481,7 @@ async function renderEditor() {
   editor.cho = await obtenerCho(editor.id);
   const c = parsear(editor.cho);
   $('#ed-titulo').textContent = c.meta.titulo || editor.id;
+  await llenarGeneros($('#ed-genero'), c.meta.genero || c.meta.género || ''); $('#ed-genero-nuevo').hidden = true; $('#ed-genero-ok').hidden = true;
   await cargarNombres();
   // --- secciones: solo letra, por palabra ---
   const cont = $('#ed-texto'); cont.innerHTML = '';
@@ -580,7 +581,7 @@ $('#ed-inst-agregar').onclick = async () => {
   await guardarEditor(cho); aviso('sección agregada'); renderEditor();
 };
 // ---------- pestaña Acordes: mover, cambiar, agregar y quitar acordes sobre la letra ----------
-const edA = { sel: null, destino: null, historial: [] }; // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
+const edA = { sel: null, destino: null, historial: [], lineaNueva: null }; // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
 function piezasLinea(raw) {
   const out = []; let i = 0;
   while (i < raw.length) {
@@ -607,6 +608,7 @@ function renderLineaEdicion(raw, l) {
   return { html, soloAcordes: !tieneTexto && piezas.some(p => p.tipo === 'ac') };
 }
 function renderEditorAcordes() {
+  const panelLetras = $('#edA-letras'); if (panelLetras && panelLetras.parentElement !== $('#edA-barra')) $('#edA-barra').insertBefore(panelLetras, $('#edA-barra').lastElementChild);
   const L = lineasCuerpo(); const art = $('#edA-cancion'); let html = '';
   L.forEach((raw, l) => {
     if (META_CAB.test(raw)) return;
@@ -616,14 +618,14 @@ function renderEditorAcordes() {
     if (RE_PARTE.test(raw)) return;
     if (!raw.trim()) { html += '<div class="linea">&nbsp;</div>'; return; }
     const r = renderLineaEdicion(raw, l);
-    html += `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}</div>`;
+    html += `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}<button class="mas-linea" data-l="${l}" title="${r.soloAcordes ? 'Agregar acordes a esta línea' : 'Agregar una línea solo de acordes debajo'}">＋</button></div>`;
   });
   art.innerHTML = html;
   if (edA.sel) { const a = art.querySelector(`.ac[data-l="${edA.sel.l}"][data-ini="${edA.sel.ini}"]`); if (a) a.classList.add('sel'); }
   if (edA.destino) { const pl = art.querySelector(`.pal[data-l="${edA.destino.l}"][data-ini="${edA.destino.ini}"]`); if (pl) pl.classList.add('destino'); }
   $('#edA-acorde-sel').hidden = !edA.sel || !!edA.destino;
-  $('#edA-letras').hidden = !edA.destino;
-  $('#edA-ayuda').hidden = !!(edA.sel || edA.destino);
+  $('#edA-letras').hidden = !edA.destino && !edA.lineaNueva;
+  $('#edA-ayuda').hidden = !!(edA.sel || edA.destino || edA.lineaNueva);
   $('#edA-deshacer').disabled = !edA.historial.length;
   const estado = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
   $('#edA-estado').textContent = estado === 'corregida' ? '✓ Corregida (volver a "importada")' : 'Marcar como corregida';
@@ -639,13 +641,17 @@ function acordesUsados() { return [...new Set([...editor.cho.matchAll(/\[([^\]]+
 function mostrarLetras(destino, paraAgregar) {
   const L = lineasCuerpo(); const raw = L[destino.l];
   const piezas = piezasLinea(raw).filter(p => p.ini >= destino.ini && p.ini < destino.fin);
+  // el panel de letras se coloca justo debajo de la línea tocada, para verlo sin subir
+  const panel = $('#edA-letras'); const lineaEl = $(`#edA-cancion .linea[data-l="${destino.l}"]`);
+  if (lineaEl) lineaEl.insertAdjacentElement('afterend', panel); else $('#edA-barra').append(panel);
   const cont = $('#edA-letras-lista'); cont.innerHTML = '';
   for (const p of piezas) {
     if (p.tipo === 'ac') { const sp = document.createElement('span'); sp.className = 'ac-ya'; sp.textContent = p.texto; cont.append(sp); continue; }
     if (/\s/.test(p.ch)) continue;
     const b = boton(p.ch, () => elegirPosicion(destino.l, p.ini)); b.dataset.idx = p.ini; cont.append(b);
   }
-  const bf = boton('al final', () => elegirPosicion(destino.l, destino.fin)); bf.className = 'fin'; bf.dataset.idx = destino.fin; cont.append(bf);
+  // "al final de la palabra": el acorde cae en el espacio entre esta palabra y la siguiente (o al final de la línea)
+  const bf = boton('al final de la palabra', () => elegirPosicion(destino.l, destino.fin)); bf.className = 'fin'; bf.dataset.idx = destino.fin; cont.append(bf);
   $('#edA-letras-ayuda').textContent = paraAgregar ? '¿Antes de qué letra va el acorde nuevo?' : `¿Antes de qué letra va ${edA.sel.texto}?`;
   $('#edA-agregar-fila').hidden = !paraAgregar;
   const chips = $('#edA-chips'); chips.innerHTML = '';
@@ -667,13 +673,33 @@ function elegirPosicion(l, idx) {
   }
 }
 $('#edA-agregar').onclick = () => {
+  if (edA.lineaNueva) {
+    const acs = $('#edA-agregar-txt').value.trim(); if (!acs) return aviso('escribe los acordes');
+    const L = lineasCuerpo(); const { l, enLaMisma } = edA.lineaNueva;
+    if (enLaMisma) L[l] = (L[l].trimEnd() + ' ' + lineaDeAcordes(acs)).trim(); else L.splice(l + 1, 0, lineaDeAcordes(acs));
+    edA.lineaNueva = null; $('#edA-agregar-txt').value = ''; $('#edA-agregar-txt').placeholder = 'Acorde a agregar (Am, G7…)';
+    guardarAcordes(L.join('\n')); return;
+  }
   const nombre = $('#edA-agregar-txt').value.trim().replace(/^\[|\]$/g, ''); if (!nombre) return aviso('escribe el acorde');
   if (!posElegida) return aviso('toca la letra donde va');
   const L = lineasCuerpo(); L[posElegida.l] = L[posElegida.l].slice(0, posElegida.idx) + `[${nombre}]` + L[posElegida.l].slice(posElegida.idx);
   edA.destino = null; posElegida = null; $('#edA-agregar-txt').value = '';
   guardarAcordes(L.join('\n'));
 };
+function mostrarAgregarLinea(l, enLaMisma) {
+  edA.lineaNueva = { l, enLaMisma }; edA.sel = null; edA.destino = null; posElegida = null;
+  const panel = $('#edA-letras'); const lineaEl = $(`#edA-cancion .linea[data-l="${l}"]`);
+  if (lineaEl) lineaEl.insertAdjacentElement('afterend', panel);
+  $('#edA-letras-lista').innerHTML = '';
+  $('#edA-letras-ayuda').textContent = enLaMisma ? 'Acordes a agregar al final de esta línea (separados por espacio):' : 'Acordes de la nueva línea, sin letra, debajo de esta (separados por espacio):';
+  $('#edA-agregar-fila').hidden = false; $('#edA-agregar-txt').placeholder = 'F#m  ·  o varios: Em D C';
+  const chips = $('#edA-chips'); chips.innerHTML = ''; for (const a of acordesUsados()) chips.append(boton(a, () => { const t = $('#edA-agregar-txt'); t.value = (t.value + ' ' + a).trim(); }));
+  panel.hidden = false; $('#edA-acorde-sel').hidden = true; $('#edA-ayuda').hidden = true;
+  $('#edA-agregar-txt').focus();
+}
 $('#edA-cancion').addEventListener('click', e => {
+  const mas = e.target.closest('.mas-linea');
+  if (mas) { const l = Number(mas.dataset.l); mostrarAgregarLinea(l, mas.closest('.linea').classList.contains('solo-acordes')); return; }
   const ac = e.target.closest('.ac'); const pal = e.target.closest('.pal');
   if (ac && ac.textContent) { edA.sel = { l: Number(ac.dataset.l), ini: Number(ac.dataset.ini), fin: Number(ac.dataset.fin), texto: ac.textContent }; edA.destino = null; renderEditorAcordes(); return; }
   if (pal) { edA.destino = { l: Number(pal.dataset.l), ini: Number(pal.dataset.ini), fin: Number(pal.dataset.fin) }; posElegida = null; renderEditorAcordes(); mostrarLetras(edA.destino, !edA.sel); }
@@ -685,7 +711,7 @@ $('#edA-cambiar').onclick = () => {
 };
 $('#edA-quitar').onclick = () => { if (!edA.sel) return; const L = lineasCuerpo(); const s = edA.sel; L[s.l] = L[s.l].slice(0, s.ini) + L[s.l].slice(s.fin); edA.sel = null; guardarAcordes(L.join('\n')); };
 $('#edA-cancelar').onclick = () => { edA.sel = null; edA.destino = null; renderEditorAcordes(); };
-$('#edA-letras-cancelar').onclick = () => { edA.destino = null; posElegida = null; renderEditorAcordes(); };
+$('#edA-letras-cancelar').onclick = () => { edA.destino = null; edA.lineaNueva = null; posElegida = null; $('#edA-agregar-txt').placeholder = 'Acorde a agregar (Am, G7…)'; renderEditorAcordes(); };
 $('#edA-deshacer').onclick = async () => { const prev = edA.historial.pop(); if (prev === undefined) return; editor.guardando = true; try { await guardarEditor(prev); } finally { editor.guardando = false; } edA.sel = null; edA.destino = null; renderEditorAcordes(); };
 $('#edA-estado').onclick = () => {
   const actual = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
@@ -766,6 +792,77 @@ async function nuevaCancionEspecial(tipo) {
 $('#btn-nuevo-mix').onclick = () => nuevaCancionEspecial('mix');
 $('#btn-nuevo-bloque').onclick = () => nuevaCancionEspecial('bloque');
 
+// ---------- género: desplegable con básicos + usados + "agregar otro" ----------
+const GENEROS_BASE = ['Rock', 'Balada', 'Tropical', 'Salsa', 'Bolero', 'Pachanga'];
+async function llenarGeneros(sel, actual = '') {
+  let usados = []; try { usados = await api('/api/generos'); } catch {}
+  const todos = [...new Set([...GENEROS_BASE, ...usados, ...(actual ? [actual] : [])])].sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '<option value="">Género…</option>';
+  for (const g of todos) { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.append(o); }
+  const o = document.createElement('option'); o.value = NUEVA; o.textContent = '＋ Agregar otro…'; sel.append(o);
+  sel.value = actual || '';
+}
+function conGenero(cho, genero) {
+  const linea = genero ? `{genero: ${genero}}` : '';
+  if (/^\{\s*g[eé]nero\s*:.*\}\s*$/mi.test(cho)) return cho.replace(/^\{\s*g[eé]nero\s*:.*\}\s*$\n?/mi, linea ? linea + '\n' : '');
+  if (!linea) return cho;
+  return cho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1${linea}\n`);
+}
+$('#imp-genero').onchange = ev => { $('#imp-genero-nuevo').hidden = ev.target.value !== NUEVA; if (ev.target.value === NUEVA) $('#imp-genero-nuevo').focus(); };
+$('#ed-genero').onchange = async ev => {
+  const nueva = ev.target.value === NUEVA;
+  $('#ed-genero-nuevo').hidden = !nueva; $('#ed-genero-ok').hidden = !nueva;
+  if (nueva) { $('#ed-genero-nuevo').focus(); return; }
+  await guardarEditor(conGenero(editor.cho, ev.target.value)); aviso('género guardado');
+  indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+};
+$('#ed-genero-ok').onclick = async () => {
+  const g = $('#ed-genero-nuevo').value.trim(); if (!g) return aviso('escribe el género');
+  await guardarEditor(conGenero(editor.cho, g)); $('#ed-genero-nuevo').hidden = true; $('#ed-genero-ok').hidden = true; $('#ed-genero-nuevo').value = '';
+  await llenarGeneros($('#ed-genero'), g); aviso('género guardado');
+  indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+};
+
+// ---------- importar por pegado (director) ----------
+let impCho = '';
+function previaImportar() {
+  const texto = $('#imp-texto').value; if (!texto.trim()) { aviso('pega el texto primero'); return false; }
+  impCho = textoAChordPro(texto, { titulo: $('#imp-titulo').value.trim(), artista: $('#imp-artista').value.trim() });
+  const c = parsear(impCho);
+  // completar campos detectados y aplicar los que escribió el director
+  if (!$('#imp-titulo').value.trim() && c.meta.titulo) $('#imp-titulo').value = c.meta.titulo;
+  if (!$('#imp-artista').value.trim() && c.meta.artista) $('#imp-artista').value = c.meta.artista;
+  if (!$('#imp-tono').value.trim() && c.meta.tono) $('#imp-tono').value = c.meta.tono;
+  const tono = $('#imp-tono').value.trim();
+  if (tono) impCho = /^\{\s*tono\s*:.*\}\s*$/mi.test(impCho) ? impCho.replace(/^\{\s*tono\s*:.*\}\s*$/mi, `{tono: ${tono}}`) : impCho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1{tono: ${tono}}\n`);
+  const c2 = parsear(impCho);
+  const nAc = (impCho.match(/\[[^\]]+\]/g) || []).length, nSec = c2.secciones.filter(s => s.nombre).length;
+  $('#imp-info').textContent = `${nAc} acordes · ${nSec} secciones detectadas · ${c2.secciones.reduce((a, s) => a + s.lineas.filter(l => l.tipo === 'letra').length, 0)} líneas de letra`;
+  $('#imp-cancion').innerHTML = renderCancion(c2, { vista: 'acordes' });
+  $('#imp-guardar').disabled = false;
+  return true;
+}
+$('#imp-previa').onclick = previaImportar;
+$('#imp-texto').oninput = () => { $('#imp-guardar').disabled = true; };
+$('#imp-guardar').onclick = async () => {
+  if (!previaImportar()) return;
+  if (!$('#imp-titulo').value.trim()) return aviso('ponle título');
+  impCho = impCho.replace(/^\{\s*titulo\s*:.*\}\s*$/mi, `{titulo: ${$('#imp-titulo').value.trim()}}`);
+  if ($('#imp-artista').value.trim()) impCho = /^\{\s*artista\s*:.*\}\s*$/mi.test(impCho) ? impCho.replace(/^\{\s*artista\s*:.*\}\s*$/mi, `{artista: ${$('#imp-artista').value.trim()}}`) : impCho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1{artista: ${$('#imp-artista').value.trim()}}\n`);
+  const gsel = $('#imp-genero').value; const genero = gsel === NUEVA ? $('#imp-genero-nuevo').value.trim() : gsel;
+  if (genero) impCho = conGenero(impCho, genero);
+  try {
+    const { id } = await api('/api/canciones', { method: 'POST', body: JSON.stringify({ cho: impCho }) });
+    indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+    $('#imp-texto').value = ''; $('#imp-titulo').value = ''; $('#imp-artista').value = ''; $('#imp-tono').value = ''; $('#imp-genero').value = ''; $('#imp-genero-nuevo').value = ''; $('#imp-genero-nuevo').hidden = true; $('#imp-cancion').innerHTML = ''; $('#imp-info').textContent = ''; $('#imp-guardar').disabled = true;
+    aviso('canción guardada');
+    await abrirEditor(id);
+    document.querySelector('.subtabs button[data-sub="acordes"]').click();
+  } catch (e) { aviso('no se guardó: ' + e.message); }
+};
+$('#imp-cancelar').onclick = () => { irA('biblioteca'); };
+$('#btn-importar').onclick = async () => { irA('importar'); await llenarGeneros($('#imp-genero')); $('#imp-genero-nuevo').hidden = true; $('#imp-texto').focus(); };
+
 // ---------- pantalla encendida, service worker, arranque ----------
 let wakeLock = null;
 async function mantenerPantalla() {
@@ -781,6 +878,11 @@ document.addEventListener('visibilitychange', () => {
   if (modo !== 'libre' && estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 });
 });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// bloquear el zoom de la interfaz (pellizco y doble toque) en Safari; la letra se agranda con A− / A+
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let ultimoToqueFin = 0;
+document.addEventListener('touchend', e => { const ahora = Date.now(); if (ahora - ultimoToqueFin < 300 && !e.target.closest('button, input, select, textarea, a')) e.preventDefault(); ultimoToqueFin = ahora; }, { passive: false });
 
 llenarPerfil(); actualizarConexion(); actualizarControles();
 document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');

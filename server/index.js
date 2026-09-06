@@ -71,6 +71,10 @@ const servidor = http.createServer(async (req, res) => {
         if (req.method === 'POST') { const nuevo = almacen.crearCancion(cuerpo.cho); avisarCancion(nuevo); return json(res, 201, { id: nuevo }); }
         if (req.method === 'PUT' && id) { almacen.guardarCancion(id, cuerpo.cho); avisarCancion(id); return json(res, 200, { id }); }
       }
+      if (rec === 'generos') {
+        const g = new Set(); for (const c of almacen.indiceCanciones()) if (c.genero) g.add(c.genero);
+        return json(res, 200, [...g].sort((a, b) => a.localeCompare(b)));
+      }
       if (rec === 'secciones') {
         // nombres de sección en uso en todo el repertorio (para reutilizarlos al marcar secciones)
         const nombres = new Set();
