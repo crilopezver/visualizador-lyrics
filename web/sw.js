@@ -1,5 +1,5 @@
 // Service worker: la app y las canciones quedan guardadas en el teléfono. Sin red, todo lo ya visto sigue disponible.
-const VERSION = 'v0.1.0';
+const VERSION = 'v0.1.1';
 const CACHE_APP = 'lyrics-app-' + VERSION;
 const CACHE_DATOS = 'lyrics-datos';
 const APP = ['/', '/index.html', '/css/app.css', '/js/app.js', '/js/chordpro.js', '/manifest.webmanifest', '/icono.svg'];
@@ -20,9 +20,15 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (url.pathname.startsWith('/api/')) return; // estado, info, rol: solo en red
-  // app: caché primero, actualiza en segundo plano
-  e.respondWith(caches.match(e.request).then(hit => {
-    const red = fetch(e.request).then(r => { if (r.ok) caches.open(CACHE_APP).then(c => c.put(e.request, r.clone())); return r; }).catch(() => hit);
-    return hit || red;
+  // app: red primero (para que todos vean siempre la última versión), con tope de 2,5 s; si no hay red, lo guardado
+  e.respondWith(new Promise(resolver => {
+    let resuelto = false;
+    const usarCache = () => caches.match(e.request).then(hit => { if (!resuelto) { resuelto = true; resolver(hit || new Response('sin red', { status: 503 })); } });
+    const tope = setTimeout(usarCache, 2500);
+    fetch(e.request).then(r => {
+      clearTimeout(tope);
+      if (r.ok) caches.open(CACHE_APP).then(c => c.put(e.request, r.clone()));
+      if (!resuelto) { resuelto = true; resolver(r); }
+    }).catch(() => { clearTimeout(tope); usarCache(); });
   }));
 });

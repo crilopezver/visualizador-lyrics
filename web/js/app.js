@@ -6,14 +6,15 @@ const $$ = s => [...document.querySelectorAll(s)];
 const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes' });
+const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false });
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
 let indice = [];                 // [{id,titulo,artista,tono,...}]
-let estado = { vivo: { cancion: null, seccion: 0 }, siguiente: [], controlCantante: false, conectados: [] };
+let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], controlCantante: false, tonos: {}, conectados: [] };
 let rol = 'musico';              // rol confirmado por el servidor
 let ws = null, conectado = false, reintento = 1000;
 let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
-const mostrando = { id: null, cancion: null, seccion: 0, frac: 0 };
+const mostrando = { id: null, cancion: null, seccion: 0, frac: 0, pintadoId: null };
+let scrollProgramatico = false, tScrollProg = null;
 const cacheCho = new Map();
 let setlistAbierto = null;
 let ultimaFirmaBib = '', ultimaFirmaCola = '';
@@ -68,8 +69,12 @@ function aplicarEstado(e) {
   $('#n-siguiente').textContent = e.siguiente.length || '';
   if (modo !== 'libre') {
     modo = puedeMover() ? 'lider' : 'siguiendo';
-    if (e.vivo.cancion) mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0 }); else vaciarVivo();
-  }
+    if (e.vivo.cancion) {
+      // el líder no se desplaza por el eco de sus propios movimientos; solo cambia de canción o de tono
+      const soloRepintar = modo === 'lider' && mostrando.id === e.vivo.cancion;
+      mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0, desplazar: !soloRepintar });
+    } else vaciarVivo();
+  } else if (mostrando.id) pintar(); // en libre, igual refleja un cambio de tono de la banda
   // repintar listas solo si cambió algo que las afecte (evita romper un toque en curso)
   const firmaBib = [rol, puedeMover(), puedeCola(), e.vivo.cancion].join('|');
   if (firmaBib !== ultimaFirmaBib) { ultimaFirmaBib = firmaBib; renderBiblioteca(); }
@@ -87,7 +92,9 @@ function actualizarControles() {
   p.textContent = modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · lo guardado sigue disponible';
   $('#panel-director').hidden = rol !== 'director';
   $('#siguiente-acciones').hidden = !(rol === 'director' && estado.siguiente.length);
-  $('#ctl-cejilla').style.display = perfil.instrumento === 'guitarra' ? '' : 'none';
+  $('#ctl-cejilla').style.display = (perfil.cejilla || perfil.instrumento === 'guitarra') ? '' : 'none';
+  $('#ctl-tono').classList.toggle('solo-lectura', rol !== 'director');
+  $('#btn-tono-orig').hidden = rol !== 'director' || !mostrando.id;
 }
 function vaciarVivo() {
   mostrando.id = null; mostrando.cancion = null;
@@ -126,18 +133,30 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
     }
     mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.cancion.secciones.length - 1));
     mostrando.frac = frac;
-    pintar();
-    if (desplazar) requestAnimationFrame(() => window.scrollTo({ top: scrollDePosicion(mostrando.seccion, mostrando.frac), behavior: 'smooth' }));
+    if (mostrando.pintadoId !== id) pintar(); else marcarSeccion(mostrando.seccion);
+    if (desplazar) requestAnimationFrame(() => scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)));
   } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
 }
+function scrollA(top) {
+  scrollProgramatico = true; clearTimeout(tScrollProg);
+  window.scrollTo({ top, behavior: 'smooth' });
+  tScrollProg = setTimeout(() => { scrollProgramatico = false; }, 700);
+}
+function marcarSeccion(i) { $$('#cancion [data-sec]').forEach(el => el.classList.toggle('actual', Number(el.dataset.sec) === i)); }
+const transpBanda = id => (estado.tonos && estado.tonos[id]) || 0;   // tono de la banda: lo fija el director, lo ven todos
+const cejillaPersonal = id => (perfil.cejilla || perfil.instrumento === 'guitarra') ? (prefs.cejilla[id] ?? 0) : 0;
 function pintar() {
   const c = mostrando.cancion; if (!c) return;
   const m = c.meta, id = mostrando.id;
-  const transp = prefs.transp[id] || 0, cejilla = perfil.instrumento === 'guitarra' ? (prefs.cejilla[id] ?? Number(m.cejilla || 0)) : 0;
+  const transp = transpBanda(id), cejilla = cejillaPersonal(id);
   $('#vivo-titulo').textContent = m.titulo || titulo(id);
-  const partes = [m.artista, m.tono ? 'Tono ' + tonoTranspuesto(m.tono, transp) + (transp ? ` (orig. ${m.tono})` : '') : '', m.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean);
+  const tonoBanda = m.tono ? tonoTranspuesto(m.tono, transp) : '';
+  const partes = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${m.tono})` : '') : 'tono sin fijar', m.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean);
   $('#vivo-sub').textContent = partes.join(' · ');
   $('#tr-valor').textContent = transp > 0 ? '+' + transp : transp; $('#cj-valor').textContent = cejilla;
+  $('#vivo-tono-info').textContent = cejilla ? `→ acordes en ${m.tono ? tonoTranspuesto(m.tono, transp - cejilla) : (transp - cejilla) + ' st'}` : '';
+  $('#btn-tono-orig').hidden = rol !== 'director';
+  mostrando.pintadoId = id;
   const art = $('#cancion');
   art.className = 'vista-' + perfil.vista;
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: mostrando.seccion });
@@ -151,9 +170,20 @@ function moverPagina(delta) {
   const pos = posicionDeScroll(y);
   if (modo !== 'lider') { modo = 'libre'; actualizarControles(); }
   else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac });
-  mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; pintar();
-  window.scrollTo({ top: y, behavior: 'smooth' });
+  mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion);
+  scrollA(y);
 }
+// Deslizamiento con el dedo: el líder transmite su posición en vivo (~12 veces por segundo); un seguidor que desliza pasa a libre.
+let tUltimoEnvio = 0, tEnvioPendiente = null;
+window.addEventListener('scroll', () => {
+  if (scrollProgramatico || !mostrando.cancion || !$('#vista-vivo').classList.contains('activa')) return;
+  if (modo === 'lider') {
+    const enviarPos = () => { const pos = posicionDeScroll(window.scrollY); mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion); enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac }); tUltimoEnvio = Date.now(); };
+    const espera = 80 - (Date.now() - tUltimoEnvio);
+    clearTimeout(tEnvioPendiente);
+    if (espera <= 0) enviarPos(); else tEnvioPendiente = setTimeout(enviarPos, espera);
+  } else if (modo === 'siguiendo') { modo = 'libre'; actualizarControles(); }
+}, { passive: true });
 function irASeccion(i) {
   if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0 }); else { modo = 'libre'; actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
@@ -185,9 +215,29 @@ $('#cancion').addEventListener('pointerup', e => {
 });
 
 // transposición, cejilla, tamaño
-const ajustar = (obj, delta, min, max) => { const id = mostrando.id; if (!id) return; obj[id] = Math.max(min, Math.min(max, (obj[id] ?? (obj === prefs.cejilla ? Number(mostrando.cancion?.meta.cejilla || 0) : 0)) + delta)); guardar('prefs', prefs); pintar(); };
-$('#tr-menos').onclick = () => ajustar(prefs.transp, -1, -11, 11);
-$('#tr-mas').onclick = () => ajustar(prefs.transp, 1, -11, 11);
+const ajustar = (obj, delta, min, max) => { const id = mostrando.id; if (!id) return; obj[id] = Math.max(min, Math.min(max, (obj[id] ?? 0) + delta)); guardar('prefs', prefs); pintar(); };
+function cambiarTonoBanda(delta) {
+  const id = mostrando.id; if (!id || rol !== 'director') return;
+  const t = Math.max(-11, Math.min(11, transpBanda(id) + delta));
+  estado.tonos = estado.tonos || {}; if (t === 0) delete estado.tonos[id]; else estado.tonos[id] = t;
+  pintar(); enviar({ tipo: 'tono', cancion: id, transp: t });
+}
+$('#tr-menos').onclick = () => cambiarTonoBanda(-1);
+$('#tr-mas').onclick = () => cambiarTonoBanda(1);
+$('#btn-tono-orig').onclick = async () => {
+  const id = mostrando.id; if (!id || rol !== 'director') return;
+  const actual = mostrando.cancion.meta.tono || '';
+  const nuevo = prompt('Tono original de la canción (ej. G, Am, F#m). Vacío para borrar:', actual); if (nuevo === null) return;
+  let cho = await obtenerCho(id);
+  const lineaTono = nuevo.trim() ? `{tono: ${nuevo.trim()}}` : '';
+  if (/^\{\s*tono\s*:.*\}\s*$/mi.test(cho)) cho = cho.replace(/^\{\s*tono\s*:.*\}\s*$\n?/mi, lineaTono ? lineaTono + '\n' : '');
+  else if (lineaTono) cho = cho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/i, `$1${lineaTono}\n`);
+  try {
+    await api(`/api/canciones/${id}`, { method: 'PUT', body: JSON.stringify({ cho }) });
+    cacheCho.set(id, cho); mostrando.cancion = parsear(cho); const e = indice.find(c => c.id === id); if (e) e.tono = nuevo.trim();
+    pintar(); aviso('tono guardado');
+  } catch (e) { aviso('no se guardó: ' + e.message); }
+};
 $('#cj-menos').onclick = () => ajustar(prefs.cejilla, -1, 0, 9);
 $('#cj-mas').onclick = () => ajustar(prefs.cejilla, 1, 0, 9);
 $('#tam-menos').onclick = () => { prefs.tam = Math.max(0.8, +(prefs.tam - 0.1).toFixed(2)); guardar('prefs', prefs); pintar(); };
@@ -280,11 +330,12 @@ $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; }
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) perfil[k] = f.elements[k].value;
-  guardar('perfil', perfil); pintar(); actualizarControles();
+  perfil.cejilla = f.elements.cejilla.checked;
+  guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
   try { ws && ws.close(); } catch {} // reconecta con el nuevo perfil/rol
   aviso('perfil guardado'); irA('vivo');
 };
@@ -303,8 +354,12 @@ async function cargarInfo() {
 
 // ---------- pantalla encendida, service worker, arranque ----------
 let wakeLock = null;
-async function mantenerPantalla() { try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch {} }
-document.addEventListener('pointerdown', mantenerPantalla, { once: true });
+async function mantenerPantalla() {
+  try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); return; } } catch {}
+  // respaldo (http, o navegador sin Wake Lock): un video mudo en bucle mantiene la pantalla encendida
+  const v = $('#despierto'); if (v && v.paused) v.play().catch(() => {});
+}
+document.addEventListener('pointerdown', mantenerPantalla);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') mantenerPantalla(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 

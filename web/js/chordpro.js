@@ -62,14 +62,23 @@ export function tonoTranspuesto(tono, n) {
 // --- render ---
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function renderSeg(acorde, texto, transp, bemoles) {
-  const ac = acorde ? transponerAcorde(acorde, transp, bemoles) : '';
-  // dividir el texto en palabras para que la línea pueda cortar entre palabras; el acorde va con la primera
-  const partes = texto.match(/\S+\s*|\s+/g) || [''];
-  let html = '';
-  partes.forEach((p, i) => {
-    html += `<span class="seg"><span class="ac">${i === 0 ? esc(ac) : ''}</span><span class="tx">${esc(p) || ' '}</span></span>`;
-  });
+// Render de una línea: los trozos de una misma palabra viajan juntos (nunca se parte una palabra),
+// aunque un acorde caiga a mitad de palabra o esté oculto en la vista de solo letra.
+function renderLinea(segs, desplazamiento, bemoles) {
+  const piezas = [];
+  for (const g of segs) {
+    const ac = g.acorde ? transponerAcorde(g.acorde, desplazamiento, bemoles) : '';
+    const partes = g.texto.split(/(\s+)/).filter((p, i) => p !== '' || i === 0);
+    if (!partes.length) partes.push('');
+    partes.forEach((p, i) => piezas.push({ ac: i === 0 ? ac : '', tx: p }));
+  }
+  let html = '', palabra = '';
+  const cerrar = () => { if (palabra) { html += `<span class="pal">${palabra}</span>`; palabra = ''; } };
+  for (const p of piezas) {
+    if (/^\s+$/.test(p.tx)) { cerrar(); html += `<span class="esp">${p.tx}</span>`; continue; }
+    palabra += `<span class="seg"><span class="ac">${esc(p.ac)}</span><span class="tx">${esc(p.tx) || ' '}</span></span>`;
+  }
+  cerrar();
   return html;
 }
 
@@ -91,7 +100,7 @@ export function renderCancion(cancion, opts = {}) {
     const lineas = s.lineas.map(l => {
       if (l.tipo === 'vacia') return '<div class="linea">&nbsp;</div>';
       if (l.tipo === 'nota') return `<div class="nota">${esc(l.texto)}</div>`;
-      const html = l.segs.map(g => renderSeg(g.acorde, g.texto, desplazamiento, bemoles)).join('');
+      const html = renderLinea(l.segs, desplazamiento, bemoles);
       return `<div class="linea ${l.tipo === 'acordes' ? 'solo-acordes' : ''}">${html}${l.rep ? `<span class="rep">(${esc(l.rep)})</span>` : ''}</div>`;
     }).join('');
     const nombre = s.nombre ? `<div class="nombre">${esc(s.nombre)}</div>` : '';

@@ -6,16 +6,18 @@ export class Estado {
     this.vivo = guardado?.vivo || { cancion: null, seccion: 0, frac: 0 };
     this.siguiente = guardado?.siguiente || [];
     this.controlCantante = guardado?.controlCantante ?? false;
+    this.tonos = guardado?.tonos || {}; // tono de la banda por canción: semitonos respecto al original (decide el director)
     this.conectados = new Map(); // ws -> {nombre, rol, instrumento}
   }
   persistir() {
-    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, controlCantante: this.controlCantante });
+    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, controlCantante: this.controlCantante, tonos: this.tonos });
   }
   snapshot() {
     return {
       vivo: this.vivo,
       siguiente: this.siguiente,
       controlCantante: this.controlCantante,
+      tonos: this.tonos,
       conectados: [...this.conectados.values()].map(c => ({ nombre: c.nombre, rol: c.rol, instrumento: c.instrumento })),
     };
   }
@@ -46,6 +48,13 @@ export class Estado {
           if (!this.puedeMoverVivo(rol) || !this.siguiente.length) return false;
           this.vivo = { cancion: this.siguiente.shift(), seccion: 0, frac: 0 };
         } else return false;
+        this.persistir(); return true;
+      }
+      case 'tono': {
+        // tono de la banda para una canción: solo el director. transp = semitonos (-11..11) respecto al tono original.
+        if (rol !== 'director' || typeof msg.cancion !== 'string') return false;
+        const t = Math.max(-11, Math.min(11, Math.round(Number(msg.transp) || 0)));
+        if (t === 0) delete this.tonos[msg.cancion]; else this.tonos[msg.cancion] = t;
         this.persistir(); return true;
       }
       case 'control': {

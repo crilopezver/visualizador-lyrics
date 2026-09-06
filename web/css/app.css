@@ -39,6 +39,8 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 .ctl{display:inline-flex;align-items:center;gap:.25rem}
 .ctl button,.ctl-btn{padding:.25rem .55rem;font-size:.9rem}
 .ctl span{min-width:1.4rem;text-align:center;color:var(--texto);font-weight:700}
+.ctl.solo-lectura button{display:none}
+#vivo-tono-info{color:var(--acorde);font-weight:700}
 .modo-siguiendo{background:#0c2a12;color:var(--ok)}
 .modo-libre{background:#2b1d05;color:var(--acorde)}
 .modo-lider{background:#0b2450;color:#8fb4ff}
@@ -49,14 +51,21 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 #cancion .seccion.actual .nombre{color:var(--acorde)}
 #cancion .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin-bottom:.35em}
 #cancion .linea{margin:.15em 0;white-space:normal}
+#cancion .pal{display:inline-block;white-space:nowrap;vertical-align:bottom}
+#cancion .esp{display:inline-block;white-space:pre;vertical-align:bottom}
 #cancion .seg{display:inline-block;vertical-align:bottom;white-space:pre}
 #cancion .ac{display:block;color:var(--acorde);font-weight:800;font-size:.9em;line-height:1.1;min-height:1.1em}
 #cancion .tx{display:block}
 #cancion .linea.solo-acordes .ac{font-size:1em}
 #cancion .linea.solo-acordes .tx{display:none}
+#cancion .linea.solo-acordes .seg{margin-right:.7em}
 #cancion .nota{color:#8fb4ff;font-style:italic;font-size:.85em;margin:.2em 0}
 #cancion .rep{color:var(--tenue);font-size:.8em;margin-left:.6em}
 #cancion.vista-letra .ac{display:none}
+#cancion.vista-letra .pal{display:inline;white-space:normal}
+#cancion.vista-letra .seg{display:inline;white-space:normal}
+#cancion.vista-letra .esp{display:inline;white-space:normal}
+#cancion.vista-letra .tx{display:inline}
 #cancion.vista-letra{font-size:calc(var(--tam) * 1.25)}
 #cancion.vista-estructura .estructura{list-style:none;padding:0;margin:0}
 #cancion.vista-estructura .estructura li{padding:.7em .6em;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;gap:1em}
