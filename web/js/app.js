@@ -324,7 +324,7 @@ async function cancionCambiada(id) {
     await mostrar(mostrando.id, mostrando.seccion, { frac: mostrando.frac, desplazar: false });
     scrollA(y);
   }
-  if (editor.id === id && $('#vista-editor').classList.contains('activa')) await renderEditor();
+  if (editor.id === id && $('#vista-editor').classList.contains('activa') && !editor.guardando) { await renderEditor(); if ($('#sub-acordes').classList.contains('activa')) renderEditorAcordes(); }
 }
 
 // ---------- siguiente (cola) ----------
@@ -454,8 +454,8 @@ const esSoloAcordes = l => { const sinAc = l.replace(/\[[^\]]*\]/g, '').replace(
 const lineaDeAcordes = texto => texto.trim().split(/\s+/).filter(Boolean).map(t => /^\(?x\d+\)?$|^\|+$/.test(t) ? t : `[${t.replace(/^\[|\]$/g, '')}]`).join(' ');
 async function abrirEditor(id) {
   if (rol !== 'director') return aviso('solo el director');
-  editor.id = id; editor.selIni = editor.selFin = null; editor.renombrar = null;
-  await renderEditor(); irA('editor'); window.scrollTo({ top: 0 });
+  editor.id = id; editor.selIni = editor.selFin = null; editor.renombrar = null; edA.sel = null; edA.destino = null; edA.historial = [];
+  await renderEditor(); if ($('#sub-acordes').classList.contains('activa')) renderEditorAcordes(); irA('editor'); window.scrollTo({ top: 0 });
 }
 async function guardarEditor(cho) {
   editor.cho = cho;
@@ -579,8 +579,123 @@ $('#ed-inst-agregar').onclick = async () => {
   }
   await guardarEditor(cho); aviso('sección agregada'); renderEditor();
 };
+// ---------- pestaña Acordes: mover, cambiar, agregar y quitar acordes sobre la letra ----------
+const edA = { sel: null, destino: null, historial: [] }; // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
+function piezasLinea(raw) {
+  const out = []; let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '[') { const j = raw.indexOf(']', i); if (j < 0) { out.push({ tipo: 'ch', ch: raw[i], ini: i }); i++; continue; } out.push({ tipo: 'ac', texto: raw.slice(i + 1, j), ini: i, fin: j + 1 }); i = j + 1; continue; }
+    out.push({ tipo: 'ch', ch: raw[i], ini: i }); i++;
+  }
+  return out;
+}
+function renderLineaEdicion(raw, l) {
+  const piezas = piezasLinea(raw);
+  let html = '', palabra = '', segAbierto = false, palIni = null, pendiente = null, tieneTexto = false;
+  const cerrarSeg = () => { if (segAbierto) { html2 += '</span></span>'; segAbierto = false; } };
+  let html2 = '';
+  const cerrarPal = (finRaw) => { cerrarSeg(); if (html2) { html += `<span class="pal" data-l="${l}" data-ini="${palIni}" data-fin="${finRaw}">${html2}</span>`; html2 = ''; } palIni = null; };
+  for (const p of piezas) {
+    if (p.tipo === 'ac') { cerrarSeg(); if (palIni === null) palIni = p.ini; html2 += `<span class="seg"><span class="ac" data-l="${l}" data-ini="${p.ini}" data-fin="${p.fin}">${esc(p.texto)}</span><span class="tx">`; segAbierto = true; continue; }
+    if (/\s/.test(p.ch)) { cerrarPal(p.ini); html += `<span class="esp">${p.ch}</span>`; continue; }
+    tieneTexto = true;
+    if (palIni === null) palIni = p.ini;
+    if (!segAbierto) { html2 += `<span class="seg"><span class="ac"></span><span class="tx">`; segAbierto = true; }
+    html2 += esc(p.ch);
+  }
+  cerrarPal(raw.length);
+  return { html, soloAcordes: !tieneTexto && piezas.some(p => p.tipo === 'ac') };
+}
+function renderEditorAcordes() {
+  const L = lineasCuerpo(); const art = $('#edA-cancion'); let html = '';
+  L.forEach((raw, l) => {
+    if (META_CAB.test(raw)) return;
+    let m;
+    if ((m = raw.match(RE_SEC))) { html += `<div class="nombre">${esc(m[1] || 'sección sin nombre')}</div>`; return; }
+    if ((m = raw.match(RE_NOTA))) { html += `<div class="nota">${esc(m[2])}</div>`; return; }
+    if (RE_PARTE.test(raw)) return;
+    if (!raw.trim()) { html += '<div class="linea">&nbsp;</div>'; return; }
+    const r = renderLineaEdicion(raw, l);
+    html += `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}</div>`;
+  });
+  art.innerHTML = html;
+  if (edA.sel) { const a = art.querySelector(`.ac[data-l="${edA.sel.l}"][data-ini="${edA.sel.ini}"]`); if (a) a.classList.add('sel'); }
+  if (edA.destino) { const pl = art.querySelector(`.pal[data-l="${edA.destino.l}"][data-ini="${edA.destino.ini}"]`); if (pl) pl.classList.add('destino'); }
+  $('#edA-acorde-sel').hidden = !edA.sel || !!edA.destino;
+  $('#edA-letras').hidden = !edA.destino;
+  $('#edA-ayuda').hidden = !!(edA.sel || edA.destino);
+  $('#edA-deshacer').disabled = !edA.historial.length;
+  const estado = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
+  $('#edA-estado').textContent = estado === 'corregida' ? '✓ Corregida (volver a "importada")' : 'Marcar como corregida';
+  $('#edA-estado').className = estado === 'corregida' ? '' : 'primario';
+  if (edA.sel) $('#edA-nombre-sel').textContent = edA.sel.texto;
+}
+async function guardarAcordes(nuevoCho) {
+  edA.historial.push(editor.cho); if (edA.historial.length > 50) edA.historial.shift();
+  editor.guardando = true; try { await guardarEditor(nuevoCho); } finally { editor.guardando = false; }
+  renderEditorAcordes();
+}
+function acordesUsados() { return [...new Set([...editor.cho.matchAll(/\[([^\]]+)\]/g)].map(m => m[1]))]; }
+function mostrarLetras(destino, paraAgregar) {
+  const L = lineasCuerpo(); const raw = L[destino.l];
+  const piezas = piezasLinea(raw).filter(p => p.ini >= destino.ini && p.ini < destino.fin);
+  const cont = $('#edA-letras-lista'); cont.innerHTML = '';
+  for (const p of piezas) {
+    if (p.tipo === 'ac') { const sp = document.createElement('span'); sp.className = 'ac-ya'; sp.textContent = p.texto; cont.append(sp); continue; }
+    if (/\s/.test(p.ch)) continue;
+    const b = boton(p.ch, () => elegirPosicion(destino.l, p.ini)); b.dataset.idx = p.ini; cont.append(b);
+  }
+  const bf = boton('al final', () => elegirPosicion(destino.l, destino.fin)); bf.className = 'fin'; bf.dataset.idx = destino.fin; cont.append(bf);
+  $('#edA-letras-ayuda').textContent = paraAgregar ? '¿Antes de qué letra va el acorde nuevo?' : `¿Antes de qué letra va ${edA.sel.texto}?`;
+  $('#edA-agregar-fila').hidden = !paraAgregar;
+  const chips = $('#edA-chips'); chips.innerHTML = '';
+  if (paraAgregar) for (const a of acordesUsados()) chips.append(boton(a, () => { $('#edA-agregar-txt').value = a; }));
+}
+let posElegida = null;
+function elegirPosicion(l, idx) {
+  if (edA.sel) { // mover
+    const L = lineasCuerpo(); const s = edA.sel; const texto = `[${s.texto}]`;
+    let raw = L[s.l]; L[s.l] = raw.slice(0, s.ini) + raw.slice(s.fin);
+    if (l === s.l && idx > s.ini) idx -= (s.fin - s.ini);
+    L[l] = L[l].slice(0, idx) + texto + L[l].slice(idx);
+    edA.sel = null; edA.destino = null;
+    guardarAcordes(L.join('\n'));
+  } else { // agregar: guardar posición y esperar el nombre
+    posElegida = { l, idx };
+    [...$('#edA-letras-lista').children].forEach(b => b.classList.toggle('primario', b.tagName === 'BUTTON' && b.dataset.idx === String(idx)));
+    $('#edA-agregar-txt').focus();
+  }
+}
+$('#edA-agregar').onclick = () => {
+  const nombre = $('#edA-agregar-txt').value.trim().replace(/^\[|\]$/g, ''); if (!nombre) return aviso('escribe el acorde');
+  if (!posElegida) return aviso('toca la letra donde va');
+  const L = lineasCuerpo(); L[posElegida.l] = L[posElegida.l].slice(0, posElegida.idx) + `[${nombre}]` + L[posElegida.l].slice(posElegida.idx);
+  edA.destino = null; posElegida = null; $('#edA-agregar-txt').value = '';
+  guardarAcordes(L.join('\n'));
+};
+$('#edA-cancion').addEventListener('click', e => {
+  const ac = e.target.closest('.ac'); const pal = e.target.closest('.pal');
+  if (ac && ac.textContent) { edA.sel = { l: Number(ac.dataset.l), ini: Number(ac.dataset.ini), fin: Number(ac.dataset.fin), texto: ac.textContent }; edA.destino = null; renderEditorAcordes(); return; }
+  if (pal) { edA.destino = { l: Number(pal.dataset.l), ini: Number(pal.dataset.ini), fin: Number(pal.dataset.fin) }; posElegida = null; renderEditorAcordes(); mostrarLetras(edA.destino, !edA.sel); }
+});
+$('#edA-cambiar').onclick = () => {
+  const n = $('#edA-cambiar-txt').value.trim().replace(/^\[|\]$/g, ''); if (!n || !edA.sel) return aviso('escribe el nuevo nombre');
+  const L = lineasCuerpo(); const s = edA.sel; L[s.l] = L[s.l].slice(0, s.ini) + `[${n}]` + L[s.l].slice(s.fin);
+  edA.sel = null; $('#edA-cambiar-txt').value = ''; guardarAcordes(L.join('\n'));
+};
+$('#edA-quitar').onclick = () => { if (!edA.sel) return; const L = lineasCuerpo(); const s = edA.sel; L[s.l] = L[s.l].slice(0, s.ini) + L[s.l].slice(s.fin); edA.sel = null; guardarAcordes(L.join('\n')); };
+$('#edA-cancelar').onclick = () => { edA.sel = null; edA.destino = null; renderEditorAcordes(); };
+$('#edA-letras-cancelar').onclick = () => { edA.destino = null; posElegida = null; renderEditorAcordes(); };
+$('#edA-deshacer').onclick = async () => { const prev = edA.historial.pop(); if (prev === undefined) return; editor.guardando = true; try { await guardarEditor(prev); } finally { editor.guardando = false; } edA.sel = null; edA.destino = null; renderEditorAcordes(); };
+$('#edA-estado').onclick = () => {
+  const actual = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
+  const nuevo = actual === 'corregida' ? 'importada' : 'corregida';
+  let cho = editor.cho;
+  if (/^\{\s*estado\s*:.*\}\s*$/mi.test(cho)) cho = cho.replace(/^\{\s*estado\s*:.*\}\s*$/mi, `{estado: ${nuevo}}`); else cho = cho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1{estado: ${nuevo}}\n`);
+  guardarAcordes(cho);
+};
 // sub-pestañas de la edición
-$$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').forEach(x => x.classList.toggle('activa', x === b)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + b.dataset.sub)); });
+$$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').forEach(x => x.classList.toggle('activa', x === b)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + b.dataset.sub)); if (b.dataset.sub === 'acordes') renderEditorAcordes(); });
 function renderArreglo() {
   const ol = $('#ed-arreglo-lista'); ol.innerHTML = '';
   editor.arreglo.forEach((n, i) => {

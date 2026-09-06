@@ -108,7 +108,22 @@
     </div>
 
     <div id="sub-acordes" class="sub">
-      <p class="ayuda">Aquí irá la corrección de la posición de los acordes (por construir).</p>
+      <div id="edA-barra" class="barra-sel">
+        <div id="edA-ayuda" class="ayuda">Toca un <b>acorde</b> para moverlo, cambiarlo o quitarlo. Toca una <b>palabra</b> para agregar un acorde ahí.</div>
+        <div id="edA-acorde-sel" hidden>
+          <div class="fila"><span>Acorde <b id="edA-nombre-sel"></b> seleccionado · toca la palabra destino para moverlo</span></div>
+          <div class="fila"><input id="edA-cambiar-txt" placeholder="Nuevo nombre (Am, G7…)"><button id="edA-cambiar">Cambiar</button><button id="edA-quitar" class="peligro">Quitar</button><button id="edA-cancelar">Cancelar</button></div>
+        </div>
+        <div id="edA-letras" hidden>
+          <div class="ayuda" id="edA-letras-ayuda">¿Antes de qué letra?</div>
+          <div id="edA-letras-lista" class="letras"></div>
+          <div class="fila" id="edA-agregar-fila" hidden><input id="edA-agregar-txt" placeholder="Acorde a agregar (Am, G7…)"><button id="edA-agregar" class="primario">Agregar</button></div>
+          <div id="edA-chips" class="chips"></div>
+          <div class="fila"><button id="edA-letras-cancelar">Cancelar</button></div>
+        </div>
+        <div class="fila"><button id="edA-deshacer">↶ Deshacer</button><button id="edA-estado"></button></div>
+      </div>
+      <article id="edA-cancion"></article>
     </div>
 
     <div id="sub-arreglo" class="sub">

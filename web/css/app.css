@@ -152,3 +152,23 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #cancion .pal.marcada .ac{color:#000}
 #cancion .linea.marcada{background:#2b1d05;border-radius:8px;box-shadow:0 0 0 6px #2b1d05}
 @keyframes latido{0%,100%{box-shadow:0 0 0 4px var(--acorde)}50%{box-shadow:0 0 0 9px rgba(245,158,11,.35)}}
+
+/* editor de acordes */
+#edA-cancion{font-size:1.15rem;line-height:1.3;margin-top:.6rem;user-select:none;-webkit-user-select:none}
+#edA-cancion .linea{margin:.35em 0;white-space:normal}
+#edA-cancion .pal{display:inline-block;white-space:nowrap;vertical-align:bottom;border-radius:6px;padding:0 .1em}
+#edA-cancion .esp{display:inline-block;white-space:pre}
+#edA-cancion .seg{display:inline-block;vertical-align:bottom;white-space:pre}
+#edA-cancion .ac{display:block;color:var(--acorde);font-weight:800;font-size:.9em;line-height:1.1;min-height:1.1em;cursor:pointer;border-radius:5px;padding:0 .15em}
+#edA-cancion .ac:not(:empty):active{background:#333}
+#edA-cancion .ac.sel{background:var(--acorde);color:#000}
+#edA-cancion .tx{display:block}
+#edA-cancion .pal.destino{background:#0b2450}
+#edA-cancion .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin:1em 0 .3em}
+#edA-cancion .nota{color:#8fb4ff;font-style:italic;font-size:.85em}
+#edA-cancion .linea.solo-acordes .seg{margin-right:.7em}
+#edA-cancion .linea.solo-acordes .tx{display:none}
+.letras{display:flex;flex-wrap:wrap;gap:.3rem;margin:.4rem 0;font-size:1.3rem}
+.letras button{min-width:2.2rem;padding:.4rem .5rem;font-weight:700}
+.letras .ac-ya{color:var(--acorde);font-size:.8rem;align-self:center;padding:0 .1rem}
+.letras .fin{font-size:.85rem;font-weight:400}
