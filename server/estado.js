@@ -18,6 +18,7 @@ export class Estado {
       siguiente: this.siguiente,
       controlCantante: this.controlCantante,
       tonos: this.tonos,
+      marca: this.marca && Date.now() - this.marca.t < 6000 ? this.marca : null,
       conectados: [...this.conectados.values()].map(c => ({ nombre: c.nombre, rol: c.rol, instrumento: c.instrumento })),
     };
   }
@@ -57,6 +58,12 @@ export class Estado {
         const t = Math.max(-11, Math.min(11, Math.round(Number(msg.transp) || 0)));
         if (t === 0) delete this.tonos[msg.cancion]; else this.tonos[msg.cancion] = t;
         this.persistir(); return true;
+      }
+      case 'marca': {
+        // "estamos aquí": señal temporal que puede mandar cualquier integrante; no se persiste, solo se difunde
+        if (typeof msg.seccion !== 'number') return false;
+        this.marca = { seccion: Number(msg.seccion) || 0, linea: Number(msg.linea) || 0, palabra: Number(msg.palabra) || 0, por: clienteId, quien: String(msg.quien || '').slice(0, 40), t: Date.now() };
+        return true;
       }
       case 'control': {
         if (rol !== 'director') return false;

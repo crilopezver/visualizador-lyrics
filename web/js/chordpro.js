@@ -96,7 +96,7 @@ const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&
 
 // Render de una línea: los trozos de una misma palabra viajan juntos (nunca se parte una palabra),
 // aunque un acorde caiga a mitad de palabra o esté oculto en la vista de solo letra.
-function renderLinea(segs, desplazamiento, bemoles) {
+function renderLinea(segs, desplazamiento, bemoles, idxLinea = 0) {
   const piezas = [];
   for (const g of segs) {
     const ac = g.acorde ? transponerAcorde(g.acorde, desplazamiento, bemoles) : '';
@@ -104,8 +104,8 @@ function renderLinea(segs, desplazamiento, bemoles) {
     if (!partes.length) partes.push('');
     partes.forEach((p, i) => piezas.push({ ac: i === 0 ? ac : '', tx: p }));
   }
-  let html = '', palabra = '';
-  const cerrar = () => { if (palabra) { html += `<span class="pal">${palabra}</span>`; palabra = ''; } };
+  let html = '', palabra = '', nPal = 0;
+  const cerrar = () => { if (palabra) { html += `<span class="pal" data-l="${idxLinea}" data-p="${nPal++}">${palabra}</span>`; palabra = ''; } };
   for (const p of piezas) {
     if (/^\s+$/.test(p.tx)) { cerrar(); html += `<span class="esp">${p.tx}</span>`; continue; }
     palabra += `<span class="seg"><span class="ac">${esc(p.ac)}</span><span class="tx">${esc(p.tx) || ' '}</span></span>`;
@@ -130,11 +130,11 @@ export function renderCancion(cancion, opts = {}) {
     return `<ol class="estructura">${items.join('')}</ol>`;
   }
   return secciones.map((s, i) => {
-    const lineas = s.lineas.map(l => {
+    const lineas = s.lineas.map((l, k) => {
       if (l.tipo === 'vacia') return '<div class="linea">&nbsp;</div>';
       if (l.tipo === 'nota') return `<div class="nota">${esc(l.texto)}</div>`;
-      const html = renderLinea(l.segs, desplazamiento, bemoles);
-      return `<div class="linea ${l.tipo === 'acordes' ? 'solo-acordes' : ''}">${html}${l.rep ? `<span class="rep">(${esc(l.rep)})</span>` : ''}</div>`;
+      const html = renderLinea(l.segs, desplazamiento, bemoles, k);
+      return `<div class="linea ${l.tipo === 'acordes' ? 'solo-acordes' : ''}" data-l="${k}">${html}${l.rep ? `<span class="rep">(${esc(l.rep)})</span>` : ''}</div>`;
     }).join('');
     const nombre = (s.nombre || s.vez > 1 || s.origen) ? `<div class="nombre">${esc(tituloSeccion(s, i))}</div>` : '';
     return `<div class="seccion ${i === seccionActual ? 'actual' : ''}" data-sec="${i}">${nombre}${lineas}</div>`;

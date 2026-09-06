@@ -47,8 +47,6 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 
 #cancion{font-size:var(--tam);line-height:1.25}
 #cancion .seccion{margin:1.1em 0 .4em;padding-top:.3em;border-top:1px solid var(--borde)}
-#cancion .seccion.actual{border-top-color:var(--acorde)}
-#cancion .seccion.actual .nombre{color:var(--acorde)}
 #cancion .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin-bottom:.35em}
 #cancion .linea{margin:.15em 0;white-space:normal}
 #cancion .pal{display:inline-block;white-space:nowrap;vertical-align:bottom}
@@ -123,3 +121,34 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 .chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.4rem 0}
 .chips button{border-radius:999px;padding:.4rem .8rem;background:#1a1204;border-color:#3a2a08;color:var(--acorde);font-weight:700}
 #vista-editor select,#vista-editor input,#vista-editor textarea{flex:1;min-width:8rem}
+
+/* edición de canción */
+.subtabs{display:flex;gap:.3rem;margin:.4rem 0 .8rem;border-bottom:1px solid var(--borde)}
+.subtabs button{background:none;border:0;border-bottom:3px solid transparent;border-radius:0;color:var(--tenue);font-weight:600;padding:.5rem .7rem}
+.subtabs button.activa{color:var(--texto);border-bottom-color:var(--acorde)}
+.sub{display:none}.sub.activa{display:block}
+.barra-sel{position:sticky;top:calc(3rem + env(safe-area-inset-top));z-index:5;background:var(--panel);border:1px solid var(--borde);border-radius:12px;padding:.6rem;margin-bottom:.6rem}
+.ed-texto{font-size:1.1rem;line-height:1.7}
+.ed-texto .ed-linea{margin:.1rem 0}
+.ed-texto .pal{display:inline-block;padding:.05rem .25rem;border-radius:6px;cursor:pointer}
+.ed-texto .pal:active{background:#333}
+.ed-texto .pal.sel{background:#0b2450;color:#dbe7ff}
+.ed-texto .pal.sel-ini,.ed-texto .pal.sel-fin{background:var(--azul2);color:#fff;font-weight:700}
+.ed-texto .ed-sec{display:flex;align-items:center;gap:.5rem;margin:.9rem 0 .3rem;padding:.35rem .5rem;background:#1a1204;border-left:4px solid var(--acorde);border-radius:6px;color:var(--acorde);font-weight:800;text-transform:uppercase;font-size:.78rem;letter-spacing:.06em}
+.ed-texto .ed-sec .n{flex:1}
+.ed-texto .ed-sec button{padding:.15rem .45rem;font-size:.8rem;text-transform:none;letter-spacing:0}
+.ed-texto .ed-sec.sin-nombre{color:var(--tenue);border-left-color:var(--tenue);background:#141414}
+.ed-texto .ed-nota{color:#8fb4ff;font-style:italic;font-size:.9rem}
+.ed-texto .ed-vacia{height:.6rem}
+
+.caja{border:1px solid var(--borde);border-radius:12px;padding:.7rem;margin:.4rem 0 .8rem;background:var(--panel)}
+.ed-texto .ed-acordes{display:flex;align-items:center;gap:.5rem;color:var(--acorde);font-weight:800;margin:.2rem 0}
+.ed-texto .ed-acordes .acs{flex:1}
+.ed-texto .ed-acordes button{padding:.15rem .45rem;font-size:.8rem}
+
+/* "estamos aquí": marca temporal (5 s) que pone quien controla el vivo manteniendo presionada una palabra */
+#cancion{touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+#cancion .pal.marcada{background:var(--acorde);color:#000;border-radius:6px;box-shadow:0 0 0 4px var(--acorde);animation:latido 1s ease-in-out infinite}
+#cancion .pal.marcada .ac{color:#000}
+#cancion .linea.marcada{background:#2b1d05;border-radius:8px;box-shadow:0 0 0 6px #2b1d05}
+@keyframes latido{0%,100%{box-shadow:0 0 0 4px var(--acorde)}50%{box-shadow:0 0 0 9px rgba(245,158,11,.35)}}
