@@ -106,6 +106,16 @@
         <div class="fila"><button id="ed-definir" class="primario">Definir sección</button><button id="ed-cancelar">Cancelar</button></div>
       </div>
       <div id="ed-texto" class="ed-texto"></div>
+      <div id="ed-nueva-sec" class="caja" hidden>
+        <b>Nueva sección aquí</b>
+        <div class="fila">
+          <select id="ed-ns-nombre"></select>
+          <input id="ed-ns-nombre-nuevo" placeholder="Nombre de la nueva sección" hidden>
+        </div>
+        <div class="fila"><input id="ed-ns-acordes" placeholder="Acordes si es instrumental (opcional): A E A7 D"></div>
+        <div class="fila"><input id="ed-ns-nota" placeholder="Nota opcional: x2, guitarra sola…"></div>
+        <div class="fila"><button id="ed-ns-agregar" class="primario">Agregar</button><button id="ed-ns-cancelar">Cancelar</button></div>
+      </div>
     </div>
 
     <div id="sub-acordes" class="sub">
@@ -128,16 +138,6 @@
     </div>
 
     <div id="sub-arreglo" class="sub">
-      <div class="caja">
-        <b>＋ Sección instrumental</b> <span class="ayuda">(intro, solo, interludio, final… sin letra)</span>
-        <div class="fila">
-          <select id="ed-inst-nombre"></select>
-          <input id="ed-inst-nombre-nuevo" placeholder="Nombre de la nueva sección" hidden>
-        </div>
-        <div class="fila"><input id="ed-inst-acordes" placeholder="Acordes, separados por espacio: A E A7 D"></div>
-        <div class="fila"><input id="ed-inst-nota" placeholder="Nota opcional: x2, guitarra sola, corte…"></div>
-        <div class="fila"><select id="ed-inst-donde"></select><button id="ed-inst-agregar" class="primario">Agregar</button></div>
-      </div>
       <p class="ayuda">Orden en que va la canción original. Toca una ficha para agregarla al final; repite las que se repiten. Sin arreglo, orden natural.</p>
       <div id="ed-chips" class="chips"></div>
       <ol id="ed-arreglo-lista" class="lista"></ol>

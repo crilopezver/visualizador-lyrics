@@ -193,3 +193,8 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 
 #edA-cancion .mas-linea{display:inline-block;vertical-align:bottom;margin-left:.5rem;padding:0 .5rem;font-size:.9rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
 #edA-cancion .mas-linea:active{color:var(--acorde)}
+
+.ed-texto .ed-anadir{display:flex;align-items:center;gap:.5rem;margin:.5rem 0;color:var(--tenue);font-size:.8rem;cursor:pointer}
+.ed-texto .ed-anadir::before,.ed-texto .ed-anadir::after{content:"";flex:1;border-top:1px dashed var(--borde)}
+.ed-texto .ed-anadir:active{color:var(--acorde)}
+#ed-nueva-sec{border-color:var(--acorde)}
