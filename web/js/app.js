@@ -6,7 +6,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false });
+const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true });
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
 let indice = [];                 // [{id,titulo,artista,tono,...}]
 let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], controlCantante: false, tonos: {}, conectados: [] };
@@ -89,8 +89,9 @@ function aplicarEstado(e) {
 }
 function actualizarControles() {
   const lider = puedeMover() && conectado && modo !== 'libre';
-  $('#controles-lider').hidden = !lider;
-  document.body.classList.toggle('con-barra', puedeMover() && conectado); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
+  const mostrarBarra = lider && (rol === 'director' || perfil.botones !== false); // el director siempre; el cantante puede ocultarla
+  $('#controles-lider').hidden = !mostrarBarra;
+  document.body.classList.toggle('con-barra', puedeMover() && conectado && (rol === 'director' || perfil.botones !== false)); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
   $('#btn-volver').hidden = modo !== 'libre';
   const p = $('#vivo-modo');
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');
@@ -340,11 +341,11 @@ $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; }
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) perfil[k] = f.elements[k].value;
-  perfil.cejilla = f.elements.cejilla.checked;
+  perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked;
   guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
   try { ws && ws.close(); } catch {} // reconecta con el nuevo perfil/rol
   aviso('perfil guardado'); irA('vivo');
