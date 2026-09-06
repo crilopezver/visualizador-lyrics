@@ -12,6 +12,8 @@ let indice = [];                 // [{id,titulo,artista,tono,...}]
 let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], controlCantante: false, tonos: {}, conectados: [] };
 let rol = 'musico';              // rol confirmado por el servidor
 let ws = null, conectado = false, reintento = 1000;
+const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
+let ultimoGesto = 0; // último toque/rueda/tecla del usuario: solo entonces un scroll cuenta como suyo
 let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
 const mostrando = { id: null, cancion: null, seccion: 0, frac: 0, pintadoId: null };
 let scrollProgramatico = false, tScrollProg = null;
@@ -51,7 +53,7 @@ function actualizarConexion() {
 function conectar() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   try { ws = new WebSocket(`${proto}://${location.host}/ws`); } catch { return programarReintento(); }
-  ws.onopen = () => { reintento = 1000; enviar({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin }); };
+  ws.onopen = () => { reintento = 1000; enviar({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId }); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; actualizarConexion(); aplicarEstado(m.estado); }
@@ -65,16 +67,18 @@ function programarReintento() { setTimeout(conectar, reintento); reintento = Mat
 
 // ---------- estado compartido ----------
 function aplicarEstado(e) {
+  const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
   estado = e;
   $('#n-siguiente').textContent = e.siguiente.length || '';
+  if (mostrando.id && transpBanda(mostrando.id) !== tonoAntes) mostrando.pintadoId = null; // cambió el tono de la banda: repintar
   if (modo !== 'libre') {
     modo = puedeMover() ? 'lider' : 'siguiendo';
     if (e.vivo.cancion) {
-      // el líder no se desplaza por el eco de sus propios movimientos; solo cambia de canción o de tono
-      const soloRepintar = modo === 'lider' && mostrando.id === e.vivo.cancion;
-      mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0, desplazar: !soloRepintar });
+      // quien movió el vivo ignora su propio eco (ya está ahí); todos los demás se desplazan
+      const esMiEco = e.vivo.por === clienteId && mostrando.id === e.vivo.cancion;
+      mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0, desplazar: !esMiEco });
     } else vaciarVivo();
-  } else if (mostrando.id) pintar(); // en libre, igual refleja un cambio de tono de la banda
+  } else if (mostrando.id && mostrando.pintadoId === null) pintar(); // en libre, refleja el cambio de tono
   // repintar listas solo si cambió algo que las afecte (evita romper un toque en curso)
   const firmaBib = [rol, puedeMover(), puedeCola(), e.vivo.cancion].join('|');
   if (firmaBib !== ultimaFirmaBib) { ultimaFirmaBib = firmaBib; renderBiblioteca(); }
@@ -134,14 +138,18 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
     mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.cancion.secciones.length - 1));
     mostrando.frac = frac;
     if (mostrando.pintadoId !== id) pintar(); else marcarSeccion(mostrando.seccion);
-    if (desplazar) requestAnimationFrame(() => scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)));
+    if (desplazar) { void $('#cancion').offsetHeight; /* fuerza layout */ scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)); }
   } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
 }
 function scrollA(top) {
   scrollProgramatico = true; clearTimeout(tScrollProg);
-  window.scrollTo({ top, behavior: 'smooth' });
-  tScrollProg = setTimeout(() => { scrollProgramatico = false; }, 700);
+  const lejos = Math.abs(top - window.scrollY) > window.innerHeight * 0.9;
+  window.scrollTo({ top, behavior: lejos ? 'smooth' : 'auto' });
+  tScrollProg = setTimeout(() => { scrollProgramatico = false; }, lejos ? 1200 : 250);
 }
+window.addEventListener('scrollend', () => { scrollProgramatico = false; }, { passive: true });
+for (const ev of ['pointerdown', 'touchmove', 'wheel', 'keydown']) window.addEventListener(ev, () => { ultimoGesto = Date.now(); }, { passive: true });
+const scrollDelUsuario = () => !scrollProgramatico && (Date.now() - ultimoGesto) < 1500;
 function marcarSeccion(i) { $$('#cancion [data-sec]').forEach(el => el.classList.toggle('actual', Number(el.dataset.sec) === i)); }
 const transpBanda = id => (estado.tonos && estado.tonos[id]) || 0;   // tono de la banda: lo fija el director, lo ven todos
 const cejillaPersonal = id => (perfil.cejilla || perfil.instrumento === 'guitarra') ? (prefs.cejilla[id] ?? 0) : 0;
@@ -176,7 +184,8 @@ function moverPagina(delta) {
 // Deslizamiento con el dedo: el líder transmite su posición en vivo (~12 veces por segundo); un seguidor que desliza pasa a libre.
 let tUltimoEnvio = 0, tEnvioPendiente = null;
 window.addEventListener('scroll', () => {
-  if (scrollProgramatico || !mostrando.cancion || !$('#vista-vivo').classList.contains('activa')) return;
+  if (!mostrando.cancion || !$('#vista-vivo').classList.contains('activa')) return;
+  if (!scrollDelUsuario()) return; // desplazamiento automático (seguir al vivo, cambio de canción): no es un gesto
   if (modo === 'lider') {
     const enviarPos = () => { const pos = posicionDeScroll(window.scrollY); mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion); enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac }); tUltimoEnvio = Date.now(); };
     const espera = 80 - (Date.now() - tUltimoEnvio);
@@ -360,7 +369,12 @@ async function mantenerPantalla() {
   const v = $('#despierto'); if (v && v.paused) v.play().catch(() => {});
 }
 document.addEventListener('pointerdown', mantenerPantalla);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') mantenerPantalla(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  mantenerPantalla();
+  // al volver del segundo plano, reubicarse en el vivo (las animaciones no corren con la pantalla apagada)
+  if (modo !== 'libre' && estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 });
+});
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 llenarPerfil(); actualizarConexion(); actualizarControles();

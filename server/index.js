@@ -109,7 +109,7 @@ wss.on('connection', ws => {
   ws.on('message', datos => {
     let msg; try { msg = JSON.parse(datos); } catch { return; }
     if (msg.tipo === 'hola') {
-      perfil = { nombre: String(msg.nombre || 'anónimo').slice(0, 40), instrumento: String(msg.instrumento || '').slice(0, 30), rol: 'musico' };
+      perfil = { nombre: String(msg.nombre || 'anónimo').slice(0, 40), instrumento: String(msg.instrumento || '').slice(0, 30), rol: 'musico', clienteId: String(msg.clienteId || '').slice(0, 40) || null };
       const deseado = msg.rol;
       const porPin = rolPorPin(msg.pin);
       if ((deseado === 'director' || deseado === 'cantante') && porPin === deseado) perfil.rol = deseado;
@@ -117,7 +117,7 @@ wss.on('connection', ws => {
       ws.send(JSON.stringify({ tipo: 'bienvenida', rol: perfil.rol, estado: estado.snapshot() }));
       difundir(); return;
     }
-    if (estado.aplicar(msg, perfil.rol)) difundir();
+    if (estado.aplicar(msg, perfil.rol, perfil.clienteId)) difundir();
     else ws.send(JSON.stringify({ tipo: 'rechazado', motivo: 'sin permiso o mensaje inválido', original: msg.tipo }));
   });
   ws.on('close', () => { estado.conectados.delete(ws); difundir(); });

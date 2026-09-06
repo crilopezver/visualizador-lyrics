@@ -25,10 +25,11 @@ export class Estado {
   puedeCola(rol) { return rol === 'director' || rol === 'cantante'; }
 
   // Devuelve true si el estado cambió.
-  aplicar(msg, rol) {
+  aplicar(msg, rol, clienteId = null) {
     switch (msg.tipo) {
       case 'vivo': {
         if (!this.puedeMoverVivo(rol)) return false;
+        this.vivo.por = clienteId; // quién movió: ese cliente ignora su propio eco
         if (msg.cancion !== undefined) { this.vivo.cancion = msg.cancion; this.vivo.seccion = 0; this.vivo.frac = 0; }
         if (typeof msg.seccion === 'number' && msg.seccion >= 0) { this.vivo.seccion = Math.floor(msg.seccion); this.vivo.frac = 0; }
         if (typeof msg.frac === 'number') this.vivo.frac = Math.max(0, Math.min(1, msg.frac));
@@ -46,7 +47,7 @@ export class Estado {
         } else if (accion === 'pasar') {
           // la primera de la cola pasa al vivo (solo quien puede mover el vivo)
           if (!this.puedeMoverVivo(rol) || !this.siguiente.length) return false;
-          this.vivo = { cancion: this.siguiente.shift(), seccion: 0, frac: 0 };
+          this.vivo = { cancion: this.siguiente.shift(), seccion: 0, frac: 0, por: clienteId };
         } else return false;
         this.persistir(); return true;
       }
