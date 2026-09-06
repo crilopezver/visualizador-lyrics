@@ -1,0 +1,17 @@
+{
+  "name": "visualizador-lyrics",
+  "version": "0.1.0",
+  "description": "Letra con acordes sincronizada en tiempo real para la banda en vivo. Servidor local en la Mac, app web (PWA) en los celulares.",
+  "private": true,
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

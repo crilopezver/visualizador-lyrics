@@ -1,0 +1,25 @@
+{titulo: Canción de Prueba}
+{artista: Pueblerinos (ejemplo inventado)}
+{tono: G}
+{cejilla: 0}
+{estado: corregida}
+
+{seccion: Intro}
+[G] [D] [Em] [C]  (x2)
+
+{seccion: Verso 1}
+[G]Salgo a la ca[D]lle temprano
+[Em]y el pueblo ya está des[C]pierto
+[G]suena un bongó a lo le[D]jano
+[Em]y el bajo marca el con[C]cierto
+
+{seccion: Coro}
+[C]Pueblerinos [G]somos
+[D]y así nos que[G]damos
+[C]Pueblerinos [G]somos
+[D]y así nos que[G]damos  (x2)
+{nota: corte seco en el último "damos"}
+
+{seccion: Final}
+[C] [G]
+{nota: termina en G, guitarra sola}

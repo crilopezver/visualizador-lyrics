@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lyrics">
+<title>Visualizador Lyrics</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icono.svg">
+<link rel="icon" href="/icono.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header id="barra">
+  <nav id="tabs">
+    <button data-vista="vivo" class="activa">En vivo</button>
+    <button data-vista="siguiente">Siguiente <span id="n-siguiente" class="pill"></span></button>
+    <button data-vista="biblioteca">Canciones</button>
+    <button data-vista="setlists">Setlists</button>
+    <button data-vista="ajustes">Yo</button>
+  </nav>
+  <div id="conexion" title="estado de la conexión"><span class="punto"></span><span id="conexion-texto">…</span></div>
+</header>
+
+<main>
+  <!-- EN VIVO -->
+  <section id="vista-vivo" class="vista activa">
+    <div id="vivo-cabecera">
+      <div id="vivo-titulo">Nada en vivo todavía</div>
+      <div id="vivo-sub"></div>
+      <div id="vivo-herr">
+        <span id="vivo-modo" class="pill modo-siguiendo">siguiendo al vivo</span>
+        <label class="ctl">Tono <button id="tr-menos">−</button><span id="tr-valor">0</span><button id="tr-mas">+</button></label>
+        <label class="ctl" id="ctl-cejilla">Cejilla <button id="cj-menos">−</button><span id="cj-valor">0</span><button id="cj-mas">+</button></label>
+        <label class="ctl">Letra <button id="tam-menos">A−</button><button id="tam-mas">A+</button></label>
+        <button id="btn-nota" class="ctl-btn" title="Mi nota personal">✎ Mi nota</button>
+      </div>
+    </div>
+    <article id="cancion"></article>
+    <div id="nota-panel" hidden>
+      <div class="nota-cab">Mi nota personal (solo la ves tú)</div>
+      <textarea id="nota-texto" rows="4" placeholder="Lo que quieras recordar de esta canción…"></textarea>
+      <div class="fila"><button id="nota-guardar" class="primario">Guardar</button><button id="nota-cerrar">Cerrar</button></div>
+    </div>
+    <button id="btn-volver" class="flotante" hidden>↩ Volver al vivo</button>
+    <div id="controles-lider" hidden>
+      <button id="lider-prev">▲ atrás</button>
+      <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
+      <button id="lider-next">▼ avanzar</button>
+    </div>
+  </section>
+
+  <!-- SIGUIENTE (cola) -->
+  <section id="vista-siguiente" class="vista">
+    <h2>Siguiente <small>cola de canciones que vienen</small></h2>
+    <ol id="lista-siguiente" class="lista"></ol>
+    <p class="vacio" id="siguiente-vacio">La cola está vacía. Agrega canciones desde “Canciones” o carga un setlist.</p>
+    <div class="fila" id="siguiente-acciones" hidden>
+      <button id="siguiente-guardar">💾 Guardar como setlist</button>
+      <button id="siguiente-vaciar" class="peligro">Vaciar cola</button>
+    </div>
+  </section>
+
+  <!-- BIBLIOTECA -->
+  <section id="vista-biblioteca" class="vista">
+    <input id="buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
+    <div id="bib-info" class="vacio"></div>
+    <ul id="lista-canciones" class="lista"></ul>
+  </section>
+
+  <!-- SETLISTS -->
+  <section id="vista-setlists" class="vista">
+    <h2>Setlists</h2>
+    <ul id="lista-setlists" class="lista"></ul>
+    <div id="setlist-detalle" hidden>
+      <h3 id="setlist-nombre"></h3>
+      <ol id="setlist-canciones" class="lista"></ol>
+      <div class="fila">
+        <button id="setlist-cargar" class="primario">▶ Cargar a “Siguiente”</button>
+        <button id="setlist-cerrar">Cerrar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- AJUSTES / PERFIL -->
+  <section id="vista-ajustes" class="vista">
+    <h2>Yo</h2>
+    <form id="form-perfil">
+      <label>Nombre <input name="nombre" required maxlength="40" placeholder="Cómo te llaman en la banda"></label>
+      <label>Instrumento
+        <select name="instrumento">
+          <option value="voz">Voz</option><option value="guitarra">Guitarra</option><option value="bajo">Bajo</option>
+          <option value="bongos">Bongos</option><option value="bateria">Batería</option><option value="otro">Otro</option>
+        </select></label>
+      <label>Rol
+        <select name="rol"><option value="musico">Músico</option><option value="cantante">Cantante</option><option value="director">Director</option></select></label>
+      <label id="campo-pin">PIN <input name="pin" type="password" inputmode="numeric" maxlength="12" placeholder="solo director y cantante"></label>
+      <label>Vista
+        <select name="vista">
+          <option value="acordes">Letra + acordes</option><option value="letra">Solo letra (grande)</option><option value="estructura">Estructura (percusión)</option>
+        </select></label>
+      <button class="primario" type="submit">Guardar</button>
+    </form>
+    <div id="panel-director" hidden>
+      <h3>Control del vivo</h3>
+      <label class="switch"><input type="checkbox" id="chk-cantante"> El cantante puede mover el vivo</label>
+      <p class="ayuda">Un solo control a la vez: si lo activas, el cantante desliza y tú puedes seguir; si lo desactivas, solo tú mueves el vivo.</p>
+    </div>
+    <div id="conectados-panel"><h3>Conectados</h3><ul id="conectados" class="lista compacta"></ul></div>
+    <div id="info-servidor" class="ayuda"></div>
+  </section>
+</main>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
