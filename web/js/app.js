@@ -6,7 +6,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true });
+const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'pagina', lineas: 4 }); // paso: página | sección | líneas (botones y pedal)
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
@@ -127,11 +127,14 @@ function posicionDeScroll(y) {
   const secs = $$('#cancion [data-sec]'); if (!secs.length) return { seccion: 0, frac: 0 };
   const ref = y + topBarra();
   let i = 0;
-  for (let k = 0; k < secs.length; k++) { const top = secs[k].getBoundingClientRect().top + window.scrollY; if (top <= ref) i = k; }
+  // tolerancia de 3 px: en iPhone el borde de una sección puede quedar en una fracción de píxel por encima de la referencia
+  // y "siguiente" volvía a apuntar a la misma sección (se trababa en Estrofa 1, 08-sep)
+  for (let k = 0; k < secs.length; k++) { const top = secs[k].getBoundingClientRect().top + window.scrollY; if (top <= ref + 3) i = k; }
   const el = secs[i], top = el.getBoundingClientRect().top + window.scrollY, h = Math.max(el.offsetHeight, 1);
   return { seccion: i, frac: Math.max(0, Math.min(1, (ref - top) / h)) };
 }
 function scrollDePosicion(seccion, frac) {
+  if (seccion === 0 && !frac) return 0; // inicio de la canción: arriba del todo (título y rótulo de la primera sección a la vista)
   const el = $(`#cancion [data-sec="${seccion}"]`); if (!el) return 0;
   const top = el.getBoundingClientRect().top + window.scrollY;
   return Math.max(0, top + frac * el.offsetHeight - topBarra());
@@ -151,7 +154,9 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
     if (desplazar) { void $('#cancion').offsetHeight; /* fuerza layout */ scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)); }
   } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
 }
+let scrollObjetivo = 0; // destino del último desplazamiento automático (si aún no terminó, los cálculos parten de ahí)
 function scrollA(top) {
+  scrollObjetivo = top;
   scrollProgramatico = true; clearTimeout(tScrollProg);
   const lejos = Math.abs(top - window.scrollY) > window.innerHeight * 0.9;
   window.scrollTo({ top, behavior: lejos ? 'smooth' : 'auto' });
@@ -199,15 +204,78 @@ function pintar() {
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 }
 // Navegación por páginas (estilo lector): avanza ~80 % de la pantalla. La sincronía viaja como sección + fracción.
-function moverPagina(delta) {
-  if (!mostrando.cancion) return;
-  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  const y = Math.max(0, Math.min(max, window.scrollY + delta * window.innerHeight * 0.8));
+function moverAScroll(y) {
   const pos = posicionDeScroll(y);
   if (modo !== 'lider') { modo = 'libre'; actualizarControles(); }
   else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac });
   mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion);
   scrollA(y);
+}
+function moverPagina(delta) {
+  if (!mostrando.cancion) return;
+  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  moverAScroll(Math.max(0, Math.min(max, window.scrollY + delta * window.innerHeight * 0.8)));
+}
+// Por líneas: la primera línea visible bajo la barra avanza (o retrocede) n líneas
+function moverLineas(n) {
+  // cuenta cada línea de letra (con sus acordes) o de solo acordes como una línea; las vacías y los títulos de sección no cuentan
+  const lineas = $$('#cancion .linea').filter(l => l.textContent.replace(/\u00a0/g, '').trim()); if (!lineas.length) return moverPagina(Math.sign(n));
+  const yBase = scrollProgramatico ? scrollObjetivo : window.scrollY; // si un salto sigue en curso, partir de su destino
+  const ref = yBase + topBarra();
+  let idx = lineas.findIndex(l => l.getBoundingClientRect().top + window.scrollY >= ref - 2); if (idx < 0) idx = lineas.length - 1;
+  // ancla de una línea: si es la primera de su sección, la sección entera (para que suba con su rótulo INTRO, ESTROFA 1…)
+  const limpio = s => s.replace(/\u00a0/g, '').trim();
+  const anclaDe = i => { const sec = lineas[i].closest('[data-sec]'); const primera = sec && [...sec.querySelectorAll('.linea')].find(l => limpio(l.textContent)) === lineas[i]; return primera ? sec : lineas[i]; };
+  const topDe = el => el.getBoundingClientRect().top + window.scrollY;
+  // si lo que va arriba todavía no está pegado a la barra (hay título encima), el primer toque solo lo acerca a la barra
+  const holgura = topDe(anclaDe(idx)) - ref;
+  const dest = Math.max(0, Math.min(lineas.length - 1, n > 0 && holgura > 8 ? idx : idx + n));
+  let y = Math.max(0, topDe(anclaDe(dest)) - topBarra());
+  if (n < 0 && dest === 0) y = 0; // subiendo hasta la primera línea: arriba del todo (título y rótulo a la vista)
+  if (Math.abs(y - yBase) < 2) return; // sin movimiento posible (principio o final)
+  moverAScroll(y);
+}
+// Por secciones. Si la sección no cabe en pantalla, "siguiente" baja de modo que la última línea completa que se veía
+// pase a ser la primera bajo la barra (con sus acordes); cuando el final ya se ve, salta al inicio de la siguiente sección.
+// "Atrás" hace lo simétrico; en el inicio de la sección va a la anterior. (Cristhian, 08-sep)
+function moverPorSeccion(delta) {
+  const n = mostrando.expandidas ? mostrando.expandidas.length : 0; if (!n) return;
+  const lim = i => Math.max(0, Math.min(n - 1, i));
+  if (perfil.vista === 'estructura') return irASeccion(lim(mostrando.seccion + delta));
+  const docTop = el => el.getBoundingClientRect().top + window.scrollY, docBot = el => el.getBoundingClientRect().bottom + window.scrollY;
+  const yBase = scrollProgramatico ? scrollObjetivo : window.scrollY; // si un salto suave sigue en curso, partir de su destino
+  const barra = topBarra();
+  // piso visible: si la barra de botones del líder está a la vista, tapa el final de la pantalla (Cristhian, 08-sep: se solapaba una línea)
+  const ctl = $('#controles-lider'); const alto = ctl && !ctl.hidden ? Math.min(window.innerHeight, ctl.getBoundingClientRect().top) : window.innerHeight;
+  const vistaIni = yBase + barra, vistaFin = yBase + alto;
+  const base = posicionDeScroll(yBase).seccion;
+  const sec = $(`#cancion [data-sec="${base}"]`); if (!sec) return irASeccion(lim(base + delta));
+  const secTop = docTop(sec), secBot = docBot(sec);
+  const lineas = [...sec.querySelectorAll('.linea')].filter(l => l.textContent.trim());
+  const pagina = (alto - barra) * 0.8;
+  if (delta > 0) {
+    if (secBot <= vistaFin + 2) { if (base < n - 1) irASeccion(base + 1); return; } // el final ya se ve: siguiente sección (en la última, nada)
+    const completas = lineas.filter(l => docTop(l) >= vistaIni - 2 && docBot(l) <= vistaFin + 2);
+    const ultima = completas[completas.length - 1];
+    let y = ultima ? docTop(ultima) - barra : yBase + pagina;
+    if (y <= yBase + 2) y = yBase + pagina; // una sola línea más alta que la pantalla: avanzar una página
+    moverAScroll(Math.max(0, y));
+  } else {
+    if (secTop >= vistaIni - 3) { if (base > 0) irASeccion(base - 1); return; } // en el inicio de la sección: sección anterior (en la primera, nada)
+    const primera = lineas.find(l => docTop(l) >= vistaIni - 2 && docBot(l) <= vistaFin + 2);
+    let y = primera ? docBot(primera) - alto : yBase - pagina;
+    y = Math.max(y, secTop - barra); // no subir por encima del inicio de la sección
+    if (y >= yBase - 2) y = Math.max(secTop - barra, yBase - pagina);
+    moverAScroll(Math.max(0, y));
+  }
+}
+// Botones atrás / siguiente y pedal: según la vista y el ajuste "avanzan por" de "Yo"
+function moverSeccion(delta) {
+  if (!mostrando.cancion) return;
+  const paso = perfil.vista === 'estructura' ? 'seccion' : (perfil.paso || 'pagina');
+  if (paso === 'seccion') return moverPorSeccion(delta);
+  if (paso === 'lineas') return moverLineas(delta * Math.max(1, Math.min(10, Number(perfil.lineas) || 4)));
+  moverPagina(delta);
 }
 // Deslizamiento con el dedo: el líder transmite su posición en vivo (~12 veces por segundo); un seguidor que desliza pasa a libre.
 let tUltimoEnvio = 0, tEnvioPendiente = null;
@@ -225,7 +293,6 @@ function irASeccion(i) {
   if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0 }); else { modo = 'libre'; actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
 }
-const moverSeccion = moverPagina;
 function verLibre(id) { modo = 'libre'; actualizarControles(); irA('vivo'); mostrar(id, 0); }
 $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
@@ -244,20 +311,23 @@ function marcarAqui(el) {
   if (!el || !mostrando.cancion) return; // cualquier integrante puede marcar "estamos aquí"
   const pal = el.closest('.pal'); const linea = el.closest('.linea'); const sec = el.closest('[data-sec]');
   if (!sec) return;
-  const marca = { seccion: Number(sec.dataset.sec), linea: linea ? Number(linea.dataset.l) : 0, palabra: pal ? Number(pal.dataset.p) : -1 };
+  const todo = perfil.vista === 'estructura' || !linea; // desde la vista Estructura (o sin línea bajo el dedo): la sección completa
+  const marca = todo ? { seccion: Number(sec.dataset.sec), linea: -1, palabra: -1, todo: true } : { seccion: Number(sec.dataset.sec), linea: Number(linea.dataset.l), palabra: pal ? Number(pal.dataset.p) : -1 };
   enviar({ tipo: 'marca', ...marca, quien: perfil.nombre }); mostrarMarca(marca); // también en el propio dispositivo
   if (navigator.vibrate) navigator.vibrate(30);
 }
 let tMarca = null;
 function mostrarMarca(m) {
-  $$('#cancion .marcada').forEach(x => x.classList.remove('marcada'));
+  $$('#cancion .marcada, #cancion .marcada-sec').forEach(x => x.classList.remove('marcada', 'marcada-sec'));
   const sec = $(`#cancion [data-sec="${m.seccion}"]`); if (!sec) return;
-  const linea = sec.querySelector(`.linea[data-l="${m.linea}"]`); if (linea) linea.classList.add('marcada');
+  const todo = m.todo || m.linea < 0;
+  if (todo) sec.classList.add('marcada-sec'); // sección completa, un solo color
+  const linea = todo ? null : sec.querySelector(`.linea[data-l="${m.linea}"]`); if (linea) linea.classList.add('marcada');
   const pal = linea && m.palabra >= 0 ? linea.querySelector(`.pal[data-p="${m.palabra}"]`) : null; if (pal) pal.classList.add('marcada');
   const el = pal || linea || sec;
   if (m.quien) aviso(`📍 ${m.quien}`);
   if (modo !== 'lider') { const r = el.getBoundingClientRect(); if (r.top < topBarra() || r.bottom > window.innerHeight * 0.85) scrollA(r.top + window.scrollY - window.innerHeight * 0.35); }
-  clearTimeout(tMarca); tMarca = setTimeout(() => $$('#cancion .marcada').forEach(x => x.classList.remove('marcada')), 5000);
+  clearTimeout(tMarca); tMarca = setTimeout(() => $$('#cancion .marcada, #cancion .marcada-sec').forEach(x => x.classList.remove('marcada', 'marcada-sec')), 5000);
 }
 $('#cancion').addEventListener('pointerdown', e => {
   toque = { x: e.clientX, y: e.clientY, t: Date.now() };
@@ -409,10 +479,12 @@ $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
+$('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
-  for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista']) perfil[k] = f.elements[k].value;
+  for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso']) perfil[k] = f.elements[k].value;
+  perfil.lineas = Math.max(1, Math.min(10, Number(f.elements.lineas.value) || 4)); f.elements.lineas.value = perfil.lineas;
   perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked;
   guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
   try { ws && ws.close(); } catch {} // reconecta con el nuevo perfil/rol

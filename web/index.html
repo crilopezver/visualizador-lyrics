@@ -204,6 +204,10 @@
         <select name="vista">
           <option value="acordes">Letra + acordes</option><option value="letra">Solo letra (grande)</option><option value="estructura">Estructura (percusión)</option>
         </select></label>
+      <label>Botones y pedal avanzan por
+        <select name="paso"><option value="pagina">Página (como un lector)</option><option value="seccion">Sección</option><option value="lineas">Líneas</option></select></label>
+      <label id="campo-lineas" hidden>Cuántas líneas por paso (1 a 10) <input name="lineas" type="number" inputmode="numeric" min="1" max="10" value="4" style="max-width:6rem"></label>
+      <p class="ayuda">En la vista Estructura los botones siempre van de sección en sección.</p>
       <button class="primario" type="submit">Guardar</button>
     </form>
     <div id="panel-director" hidden>

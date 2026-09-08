@@ -62,7 +62,7 @@ export class Estado {
       case 'marca': {
         // "estamos aquí": señal temporal que puede mandar cualquier integrante; no se persiste, solo se difunde
         if (typeof msg.seccion !== 'number') return false;
-        this.marca = { seccion: Number(msg.seccion) || 0, linea: Number(msg.linea) || 0, palabra: Number(msg.palabra) || 0, por: clienteId, quien: String(msg.quien || '').slice(0, 40), t: Date.now() };
+        this.marca = { seccion: Number(msg.seccion) || 0, linea: Number(msg.linea) || 0, palabra: Number(msg.palabra) || 0, todo: !!msg.todo, por: clienteId, quien: String(msg.quien || '').slice(0, 40), t: Date.now() }; // todo: la sección completa (desde la vista Estructura)
         return true;
       }
       case 'control': {

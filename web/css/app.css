@@ -204,3 +204,7 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #panel-mac a{display:block;text-align:center;background:var(--acorde);color:#000;font-weight:800;text-decoration:none;border-radius:999px;padding:.9rem 1.2rem;font-size:1.05rem}
 #ed-editar-sec{border-color:#8fb4ff}
 #ed-editar-sec textarea{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:1rem;background:#000;color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:.5rem}
+/* marca "estamos aquí" de una sección completa (desde la vista Estructura): un solo color, sin latido */
+#cancion .seccion.marcada-sec{background:#3a2806;border-radius:10px;box-shadow:0 0 0 8px #3a2806}
+#cancion.vista-estructura .estructura li.marcada-sec{background:var(--acorde);color:#000}
+#cancion.vista-estructura .estructura li.marcada-sec .acs,#cancion.vista-estructura .estructura li.marcada-sec .nota{color:#000}
