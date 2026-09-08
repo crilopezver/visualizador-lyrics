@@ -198,3 +198,6 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 .ed-texto .ed-anadir::before,.ed-texto .ed-anadir::after{content:"";flex:1;border-top:1px dashed var(--borde)}
 .ed-texto .ed-anadir:active{color:var(--acorde)}
 #ed-nueva-sec{border-color:var(--acorde)}
+/* enlace al panel de la Mac (pestaña Yo, solo en localhost) */
+#panel-mac{margin:1rem 0}
+#panel-mac a{display:block;text-align:center;background:var(--acorde);color:#000;font-weight:800;text-decoration:none;border-radius:999px;padding:.9rem 1.2rem;font-size:1.05rem}

@@ -14,6 +14,9 @@ Letra con acordes **sincronizada en tiempo real** para una banda en vivo. Un ser
 Node 20 o superior en la laptop. Los celulares solo necesitan un navegador (Safari o Chrome).
 
 ## Arranque
+**Con ícono, sin Terminal (Mac):** una sola vez, `./lanzador/crear_app.sh` genera `Visualizador Lyrics.app` en la carpeta padre del repo. A partir de ahí, doble clic en el ícono: arranca el servidor en segundo plano (si no estaba ya corriendo) y abre en el navegador el **panel de la Mac** (`http://localhost:8080/mac`) con el código QR y la dirección para los celulares, la lista de conectados, el botón "Abrir la app como director" (en la propia Mac no hace falta PIN) y el botón "Cerrar app", que apaga el servidor. El registro queda en `/tmp/visualizador-lyrics.log`.
+
+**Por línea de comandos:**
 ```bash
 npm install
 npm start

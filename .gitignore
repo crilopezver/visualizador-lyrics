@@ -14,3 +14,5 @@ __pycache__/
 # Locales
 *.log
 .env
+# Lanzador generado por lanzador/crear_app.sh (rutas de esta Mac)
+*.app/

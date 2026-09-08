@@ -13,6 +13,7 @@ const RAIZ_APP = path.join(AQUI, '..');
 const WEB = path.join(RAIZ_APP, 'web');
 const PUERTO = Number(process.env.PUERTO || 8080);
 const VERSION = JSON.parse(fs.readFileSync(path.join(RAIZ_APP, 'package.json'), 'utf8')).version;
+const ARRANQUE = Date.now();
 
 // Carpeta de datos: variable DATOS, o ../datos (fuera del repo); si no existe, datos.ejemplo.
 let DATOS = process.env.DATOS ? path.resolve(process.env.DATOS) : path.join(RAIZ_APP, '..', 'datos');
@@ -43,6 +44,9 @@ function rolPorPin(pin) {
   if (pin && pin === u.cantante?.pin) return 'cantante';
   return 'musico';
 }
+// La propia Mac (conexión por localhost) es del director: no necesita PIN. Los celulares entran por la IP de red y sí lo necesitan.
+const LOCALES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const esLocal = req => LOCALES.has(req.socket?.remoteAddress);
 function ipsLocales() {
   const out = [];
   for (const [nombre, lista] of Object.entries(os.networkInterfaces()))
@@ -58,8 +62,13 @@ const servidor = http.createServer(async (req, res) => {
     if (p.startsWith('/api/')) {
       const partes = p.split('/').filter(Boolean); // ['api', recurso, id, ...]
       const rec = partes[1], id = partes[2];
-      const rol = rolPorPin(req.headers['x-pin']);
-      if (rec === 'info') return json(res, 200, { version: VERSION, puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo') });
+      const local = esLocal(req);
+      let rol = rolPorPin(req.headers['x-pin']); if (rol === 'musico' && local) rol = 'director';
+      if (rec === 'info') return json(res, 200, { version: VERSION, puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
+      if (rec === 'apagar') { // solo desde la propia Mac (panel de control)
+        if (!local || req.method !== 'POST') return json(res, 403, { error: 'solo desde la Mac' });
+        json(res, 200, { ok: true }); console.log('Apagado desde el panel de la Mac.'); setTimeout(() => process.exit(0), 300); return;
+      }
       if (rec === 'estado') return json(res, 200, estado.snapshot());
       if (rec === 'rol') return json(res, 200, { rol });
       if (rec === 'canciones') {
@@ -98,7 +107,7 @@ const servidor = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'ruta desconocida' });
     }
     // ---------- estáticos ----------
-    let rel = p === '/' ? '/index.html' : p;
+    let rel = p === '/' ? '/index.html' : p === '/mac' ? '/mac.html' : p;
     const ruta = path.normalize(path.join(WEB, rel));
     if (!ruta.startsWith(WEB) || !fs.existsSync(ruta) || fs.statSync(ruta).isDirectory()) { res.writeHead(404); return res.end('no encontrado'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(ruta)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
@@ -118,7 +127,8 @@ function difundir() {
   const m = JSON.stringify({ tipo: 'estado', estado: estado.snapshot() });
   for (const c of wss.clients) if (c.readyState === 1) c.send(m);
 }
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
+  const local = esLocal(req);
   let perfil = { nombre: 'anónimo', rol: 'musico', instrumento: '' };
   ws.on('message', datos => {
     let msg; try { msg = JSON.parse(datos); } catch { return; }
@@ -127,6 +137,7 @@ wss.on('connection', ws => {
       const deseado = msg.rol;
       const porPin = rolPorPin(msg.pin);
       if ((deseado === 'director' || deseado === 'cantante') && porPin === deseado) perfil.rol = deseado;
+      else if (deseado === 'director' && local) perfil.rol = 'director'; // la propia Mac
       estado.conectados.set(ws, perfil);
       ws.send(JSON.stringify({ tipo: 'bienvenida', rol: perfil.rol, estado: estado.snapshot() }));
       difundir(); return;

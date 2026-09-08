@@ -8,6 +8,11 @@ const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } 
 
 const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true });
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
+// Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
+if (new URLSearchParams(location.search).get('director') === '1') {
+  perfil.rol = 'director'; if (!perfil.nombre) perfil.nombre = 'Director (Mac)'; guardar('perfil', perfil);
+  history.replaceState(null, '', location.pathname);
+}
 let indice = [];                 // [{id,titulo,artista,tono,...}]
 let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], controlCantante: false, tonos: {}, conectados: [] };
 let rol = 'musico';              // rol confirmado por el servidor
@@ -422,6 +427,7 @@ function renderConectados() {
 async function cargarInfo() {
   try {
     const i = await api('/api/info');
+    $('#panel-mac').hidden = !i.local; // solo en la propia Mac: vuelve al panel con el QR
     $('#info-servidor').innerHTML = `Servidor v${esc(i.version)} · datos: ${esc(i.datos)}${i.ejemplo ? ' <b>(datos de ejemplo, no los reales)</b>' : ''}<br>Direcciones para los demás: ${i.ips.map(x => `<b>http://${x.ip}:${i.puerto}</b>`).join(' · ')}`;
   } catch { $('#info-servidor').textContent = 'Sin conexión con el servidor.'; }
 }
