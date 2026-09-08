@@ -222,7 +222,7 @@ function irASeccion(i) {
 }
 const moverSeccion = moverPagina;
 function verLibre(id) { modo = 'libre'; actualizarControles(); irA('vivo'); mostrar(id, 0); }
-$('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
+$('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
 $('#lider-pasar').onclick = () => { if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
@@ -546,7 +546,9 @@ $('#ed-definir').onclick = async () => {
   // corte al final del tramo: si la última palabra no cierra su línea, se parte la línea ahí
   { const pals = palabrasCrudas(L[b.i]);
     if (b.w < pals.length - 1) { const idx = pals[b.w].fin; L.splice(b.i, 1, L[b.i].slice(0, idx).trimEnd(), '{seccion: }', L[b.i].slice(idx).trimStart()); }
-    else { let j = b.i + 1; while (j < L.length && !L[j].trim()) j++; if (j < L.length && !RE_SEC.test(L[j]) && !RE_PARTE.test(L[j]) && !META_CAB.test(L[j])) L.splice(b.i + 1, 0, '{seccion: }'); } }
+    else { // las líneas solo de acordes que siguen (acorde de cola, p. ej. el D7 final de un coro) viajan con el tramo
+      let fin = b.i; { let k = b.i + 1; while (k < L.length && (!L[k].trim() || esSoloAcordes(L[k]))) { if (esSoloAcordes(L[k])) fin = k; k++; } }
+      let j = fin + 1; while (j < L.length && !L[j].trim()) j++; if (j < L.length && !RE_SEC.test(L[j]) && !RE_PARTE.test(L[j]) && !META_CAB.test(L[j])) L.splice(fin + 1, 0, '{seccion: }'); } }
   // corte al inicio del tramo: si la primera palabra no abre su línea, se parte la línea ahí (los acordes viajan con su palabra)
   { const pals = palabrasCrudas(L[a.i]);
     if (a.w > 0) { const idx = pals[a.w].ini; L.splice(a.i, 1, L[a.i].slice(0, idx).trimEnd(), `{seccion: ${nombre}}`, L[a.i].slice(idx)); }
