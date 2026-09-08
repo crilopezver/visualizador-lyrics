@@ -34,6 +34,7 @@ export class Estado {
         if (msg.cancion !== undefined) { this.vivo.cancion = msg.cancion; this.vivo.seccion = 0; this.vivo.frac = 0; }
         if (typeof msg.seccion === 'number' && msg.seccion >= 0) { this.vivo.seccion = Math.floor(msg.seccion); this.vivo.frac = 0; }
         if (typeof msg.frac === 'number') this.vivo.frac = Math.max(0, Math.min(1, msg.frac));
+        this.vivo.paso = ['seccion', 'pagina', 'lineas'].includes(msg.paso) ? msg.paso : 'deslizar'; // cómo se movió quien controla (los demás ajustan la letra solo si fue por sección)
         this.persistir(); return true;
       }
       case 'siguiente': {

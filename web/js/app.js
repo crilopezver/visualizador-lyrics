@@ -6,7 +6,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'pagina', lineas: 4 }); // paso: página | sección | líneas (botones y pedal)
+const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'pagina', lineas: 4, ajustar: true }); // paso: página | sección | líneas (botones y pedal)
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
@@ -93,6 +93,7 @@ function aplicarEstado(e) {
   if (firmaCola !== ultimaFirmaCola) { ultimaFirmaCola = firmaCola; renderSiguiente(); }
   renderConectados(); actualizarControles();
   const chk = $('#chk-cantante'); if (chk) chk.checked = !!e.controlCantante;
+  const bc = $('#btn-cantante'); if (bc) { bc.classList.toggle('activo', !!e.controlCantante); bc.textContent = e.controlCantante ? '🎤 sí' : '🎤 no'; } // acceso rápido en la barra fija (director)
 }
 function actualizarControles() {
   const lider = puedeMover() && conectado && modo !== 'libre';
@@ -108,6 +109,7 @@ function actualizarControles() {
   $('#ctl-cejilla').style.display = (perfil.cejilla || perfil.instrumento === 'guitarra') ? '' : 'none';
   $('#ctl-tono').classList.toggle('solo-lectura', rol !== 'director');
   $('#btn-tono-orig').hidden = rol !== 'director' || !mostrando.id;
+  $('#btn-cantante').hidden = rol !== 'director';
 }
 function vaciarVivo() {
   mostrando.id = null; mostrando.cancion = null;
@@ -151,6 +153,7 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
     mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.expandidas.length - 1));
     mostrando.frac = frac;
     if (mostrando.pintadoId !== id) pintar(); else marcarSeccion(mostrando.seccion);
+    ajustarLetra();
     if (desplazar) { void $('#cancion').offsetHeight; /* fuerza layout */ scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)); }
   } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
 }
@@ -178,6 +181,29 @@ async function expandirConPartes(cancion) {
   });
 }
 function marcarSeccion(i) { $$('#cancion [data-sec]').forEach(el => el.classList.toggle('actual', Number(el.dataset.sec) === i)); }
+// Ajuste automático de letra (Cristhian, 08-sep): solo cuando quien controla el vivo avanza POR SECCIÓN (el dato viaja con cada
+// movimiento del vivo). Cada dispositivo con la casilla encendida reduce su letra para que quepan la sección actual, el rótulo de la
+// siguiente y sus dos primeras líneas. Piso 80 %; nunca agranda. En libre, o si se avanza por página/líneas/deslizando, no ajusta.
+const AJUSTE_MIN = 0.8; // piso: Cristhian probó 65 % y lo vio muy pequeño (08-sep)
+let ajusteActual = 1;
+function ajustarLetra() {
+  const root = document.documentElement;
+  const poner = k => { if (k !== ajusteActual) { ajusteActual = k; root.style.setProperty('--ajuste', k); void $('#cancion').offsetHeight; } };
+  const porSeccion = modo === 'lider' ? (perfil.paso === 'seccion' || perfil.vista === 'estructura') : (modo === 'siguiendo' && estado.vivo && estado.vivo.paso === 'seccion');
+  const activo = perfil.ajustar !== false && perfil.vista !== 'estructura' && mostrando.expandidas && porSeccion;
+  if (!activo) return poner(1);
+  const sec = $(`#cancion [data-sec="${mostrando.seccion}"]`); if (!sec) return poner(1);
+  const ctl = $('#controles-lider'); const piso = ctl && !ctl.hidden ? Math.min(window.innerHeight, ctl.getBoundingClientRect().top) : window.innerHeight;
+  const disponible = piso - topBarra() - 6;
+  const necesario = () => {
+    const top = sec.getBoundingClientRect().top; let fin = sec.getBoundingClientRect().bottom;
+    const sig = sec.nextElementSibling && sec.nextElementSibling.matches('[data-sec]') ? sec.nextElementSibling : null;
+    if (sig) { const ls = [...sig.querySelectorAll('.linea')].filter(l => l.textContent.replace(/\u00a0/g, '').trim()); const l2 = ls[Math.min(1, ls.length - 1)]; fin = l2 ? l2.getBoundingClientRect().bottom : sig.getBoundingClientRect().bottom; }
+    return fin - top;
+  };
+  poner(1); let k = 1, n = necesario();
+  for (let i = 0; i < 3 && n > disponible && k > AJUSTE_MIN; i++) { k = Math.max(AJUSTE_MIN, +(k * disponible / n * 0.98).toFixed(3)); poner(k); n = necesario(); }
+}
 const transpBanda = id => (estado.tonos && estado.tonos[id]) || 0;   // tono de la banda: lo fija el director, lo ven todos
 const cejillaPersonal = id => (perfil.cejilla || perfil.instrumento === 'guitarra') ? (prefs.cejilla[id] ?? 0) : 0;
 function pintar() {
@@ -191,6 +217,7 @@ function pintar() {
   $('#tr-valor').textContent = transp > 0 ? '+' + transp : transp; $('#cj-valor').textContent = cejilla;
   $('#vivo-tono-info').textContent = cejilla ? `→ acordes en ${m.tono ? tonoTranspuesto(m.tono, transp - cejilla) : (transp - cejilla) + ' st'}` : '';
   $('#btn-tono-orig').hidden = rol !== 'director';
+  $('#btn-cantante').hidden = rol !== 'director';
   mostrando.pintadoId = id;
   const art = $('#cancion');
   art.className = 'vista-' + perfil.vista;
@@ -204,17 +231,17 @@ function pintar() {
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 }
 // Navegación por páginas (estilo lector): avanza ~80 % de la pantalla. La sincronía viaja como sección + fracción.
-function moverAScroll(y) {
+function moverAScroll(y, paso = perfil.paso || 'pagina') {
   const pos = posicionDeScroll(y);
   if (modo !== 'lider') { modo = 'libre'; actualizarControles(); }
-  else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac });
+  else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac, paso });
   mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion);
   scrollA(y);
 }
 function moverPagina(delta) {
   if (!mostrando.cancion) return;
   const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  moverAScroll(Math.max(0, Math.min(max, window.scrollY + delta * window.innerHeight * 0.8)));
+  moverAScroll(Math.max(0, Math.min(max, window.scrollY + delta * window.innerHeight * 0.8)), 'pagina');
 }
 // Por líneas: la primera línea visible bajo la barra avanza (o retrocede) n líneas
 function moverLineas(n) {
@@ -233,7 +260,7 @@ function moverLineas(n) {
   let y = Math.max(0, topDe(anclaDe(dest)) - topBarra());
   if (n < 0 && dest === 0) y = 0; // subiendo hasta la primera línea: arriba del todo (título y rótulo a la vista)
   if (Math.abs(y - yBase) < 2) return; // sin movimiento posible (principio o final)
-  moverAScroll(y);
+  moverAScroll(y, 'lineas');
 }
 // Por secciones. Si la sección no cabe en pantalla, "siguiente" baja de modo que la última línea completa que se veía
 // pase a ser la primera bajo la barra (con sus acordes); cuando el final ya se ve, salta al inicio de la siguiente sección.
@@ -259,19 +286,20 @@ function moverPorSeccion(delta) {
     const ultima = completas[completas.length - 1];
     let y = ultima ? docTop(ultima) - barra : yBase + pagina;
     if (y <= yBase + 2) y = yBase + pagina; // una sola línea más alta que la pantalla: avanzar una página
-    moverAScroll(Math.max(0, y));
+    moverAScroll(Math.max(0, y), 'seccion');
   } else {
     if (secTop >= vistaIni - 3) { if (base > 0) irASeccion(base - 1); return; } // en el inicio de la sección: sección anterior (en la primera, nada)
     const primera = lineas.find(l => docTop(l) >= vistaIni - 2 && docBot(l) <= vistaFin + 2);
     let y = primera ? docBot(primera) - alto : yBase - pagina;
     y = Math.max(y, secTop - barra); // no subir por encima del inicio de la sección
     if (y >= yBase - 2) y = Math.max(secTop - barra, yBase - pagina);
-    moverAScroll(Math.max(0, y));
+    moverAScroll(Math.max(0, y), 'seccion');
   }
 }
 // Botones atrás / siguiente y pedal: según la vista y el ajuste "avanzan por" de "Yo"
 function moverSeccion(delta) {
   if (!mostrando.cancion) return;
+  // cada dispositivo avanza como lo tiene configurado en "Yo" (Cristhian, 08-sep): nada se comparte entre dispositivos
   const paso = perfil.vista === 'estructura' ? 'seccion' : (perfil.paso || 'pagina');
   if (paso === 'seccion') return moverPorSeccion(delta);
   if (paso === 'lineas') return moverLineas(delta * Math.max(1, Math.min(10, Number(perfil.lineas) || 4)));
@@ -290,7 +318,7 @@ window.addEventListener('scroll', () => {
   } else if (modo === 'siguiendo') { modo = 'libre'; actualizarControles(); }
 }, { passive: true });
 function irASeccion(i) {
-  if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0 }); else { modo = 'libre'; actualizarControles(); }
+  if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0, paso: 'seccion' }); else { modo = 'libre'; actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
 }
 function verLibre(id) { modo = 'libre'; actualizarControles(); irA('vivo'); mostrar(id, 0); }
@@ -479,18 +507,19 @@ $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
 $('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso']) perfil[k] = f.elements[k].value;
   perfil.lineas = Math.max(1, Math.min(10, Number(f.elements.lineas.value) || 4)); f.elements.lineas.value = perfil.lineas;
-  perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked;
+  perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked; perfil.ajustar = f.elements.ajustar.checked;
   guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
   try { ws && ws.close(); } catch {} // reconecta con el nuevo perfil/rol
   aviso('perfil guardado'); irA('vivo');
 };
 $('#chk-cantante').onchange = ev => enviar({ tipo: 'control', cantante: ev.target.checked });
+$('#btn-cantante').onclick = () => { const nuevo = !estado.controlCantante; enviar({ tipo: 'control', cantante: nuevo }); aviso(nuevo ? 'el cantante puede mover el vivo' : 'solo tú mueves el vivo'); }; // botón fijo en la barra del director; se guarda al instante en el servidor
 function renderConectados() {
   const ul = $('#conectados'); ul.innerHTML = '';
   for (const c of estado.conectados) { const li = document.createElement('li'); li.textContent = `${c.nombre}${c.instrumento ? ' · ' + c.instrumento : ''}${c.rol !== 'musico' ? ' · ' + c.rol : ''}`; ul.append(li); }

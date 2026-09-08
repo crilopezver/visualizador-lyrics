@@ -49,6 +49,7 @@
       <div class="fila"><button id="nota-guardar" class="primario">Guardar</button><button id="nota-cerrar">Cerrar</button></div>
     </div>
     <div id="controles-lider" hidden>
+      <button id="btn-cantante" class="mini" hidden title="El cantante puede manejar el vivo (un solo control a la vez). Se guarda al instante.">🎤</button>
       <button id="lider-prev">▲ atrás</button>
       <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
       <button id="lider-next">▼ avanzar</button>
@@ -207,7 +208,8 @@
       <label>Botones y pedal avanzan por
         <select name="paso"><option value="pagina">Página (como un lector)</option><option value="seccion">Sección</option><option value="lineas">Líneas</option></select></label>
       <label id="campo-lineas" hidden>Cuántas líneas por paso (1 a 10) <input name="lineas" type="number" inputmode="numeric" min="1" max="10" value="4" style="max-width:6rem"></label>
-      <p class="ayuda">En la vista Estructura los botones siempre van de sección en sección.</p>
+      <p class="ayuda">En la vista Estructura los botones siempre van de sección en sección. Cada dispositivo avanza como lo tenga configurado aquí.</p>
+      <label class="switch"><input type="checkbox" name="ajustar" checked> Ajustar mi letra para que quepa la sección completa y el inicio de la siguiente, solo cuando quien controla el vivo avanza por sección (se reduce hasta un 80 % si hace falta; nunca se agranda)</label>
       <button class="primario" type="submit">Guardar</button>
     </form>
     <div id="panel-director" hidden>
