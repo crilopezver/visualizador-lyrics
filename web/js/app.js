@@ -1,5 +1,5 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
-import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro } from './chordpro.js';
+import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo } from './chordpro.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -435,7 +435,7 @@ async function cargarInfo() {
 // ---------- edición de canción (director, desde "Canciones") ----------
 const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null };
 const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
-const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo)\s*:/i;
+const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género)\s*:/i;
 const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_PARTE = /^\{\s*parte\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_NOTA = /^\{\s*(nota|comentario|c)\s*:\s*(.*?)\s*\}\s*$/i;
@@ -444,18 +444,6 @@ const NUEVA = '__nueva__';
 
 // Palabras de una línea cruda (con acordes entre corchetes): índices en la línea para poder partirla.
 // `ini` retrocede sobre los acordes pegados al inicio de la palabra para que viajen con ella.
-function palabrasCrudas(raw) {
-  const out = []; let i = 0; const n = raw.length; let enPalabra = false, iniPal = 0, texto = '', bracketPrevio = null;
-  while (i < n) {
-    const ch = raw[i];
-    if (ch === '[') { const j = raw.indexOf(']', i); const cierre = j < 0 ? n - 1 : j; if (!enPalabra && bracketPrevio === null) bracketPrevio = i; i = cierre + 1; continue; }
-    if (/\s/.test(ch)) { if (enPalabra) { out.push({ ini: iniPal, fin: i, texto }); enPalabra = false; texto = ''; } bracketPrevio = null; i++; continue; }
-    if (!enPalabra) { enPalabra = true; iniPal = bracketPrevio !== null ? bracketPrevio : i; texto = ''; }
-    texto += ch; i++;
-  }
-  if (enPalabra) out.push({ ini: iniPal, fin: n, texto });
-  return out;
-}
 const esSoloAcordes = l => { const sinAc = l.replace(/\[[^\]]*\]/g, '').replace(/\((x\d+)\)|x\d+|\||-/g, '').trim(); return /\[[^\]]+\]/.test(l) && !sinAc; };
 const lineaDeAcordes = texto => texto.trim().split(/\s+/).filter(Boolean).map(t => /^\(?x\d+\)?$|^\|+$/.test(t) ? t : `[${t.replace(/^\[|\]$/g, '')}]`).join(' ');
 async function abrirEditor(id) {
@@ -504,7 +492,10 @@ async function renderEditor() {
       const div = document.createElement('div'); div.className = 'ed-sec' + (m[1] ? '' : ' sin-nombre');
       div.innerHTML = `<span class="n">${esc(m[1] || 'sección sin nombre')}</span>`;
       div.append(boton('✎ nombre', () => { editor.renombrar = i; editor.selIni = editor.selFin = null; renderEditor(); mostrarBarra(); }));
+      div.append(boton('✎ nota', () => abrirEditarSeccion(i, 'nota', div)));
+      div.append(boton('✎ letra', () => abrirEditarSeccion(i, 'letra', div)));
       div.append(boton('✕', async () => { if (!confirm('¿Quitar la marca de sección? La letra se conserva.')) return; L.splice(i, 1); await guardarEditor(L.join('\n')); renderEditor(); }));
+      div.append(boton('🗑', async () => { if (!confirm(`¿Eliminar la sección "${m[1] || 'sin nombre'}" con su letra y acordes? Si se repite en la canción, mejor repítela en el Arreglo.`)) return; await guardarEditor(eliminarSeccion(editor.cho, i)); renderEditor(); }));
       cont.append(div); return;
     }
     if ((m = l.match(RE_PARTE))) { const d = document.createElement('div'); d.className = 'ed-nota'; d.textContent = '↪ parte: ' + m[1]; cont.append(d); return; }
@@ -526,6 +517,7 @@ async function renderEditor() {
   filaAnadir(L.length, '＋ añadir sección al final');
   $('#ed-sel-barra').hidden = editor.selIni === null && editor.renombrar === null;
   $('#ed-definir').textContent = editor.renombrar !== null ? 'Renombrar sección' : 'Definir sección';
+  $('#ed-eliminar-tramo').hidden = editor.renombrar !== null || editor.selIni === null; // eliminar letra: con una palabra o un tramo elegido
   // --- arreglo original ---
   const nombres = [...new Set(c.secciones.map(s => s.nombre || '').filter(Boolean))];
   const chips = $('#ed-chips'); chips.innerHTML = '';
@@ -541,6 +533,15 @@ function seleccionarPalabra(pos) {
   renderEditor().then(() => { if (editor.selFin) mostrarBarra(); });
 }
 $('#ed-cancelar').onclick = () => { editor.selIni = editor.selFin = null; editor.renombrar = null; renderEditor(); };
+$('#ed-eliminar-tramo').onclick = async () => { // borra la letra seleccionada (y sus acordes) sin crear sección
+  if (editor.selIni === null || editor.renombrar !== null) return;
+  let a = { ...editor.selIni }, b = editor.selFin ? { ...editor.selFin } : { ...editor.selIni };
+  if (!antes(a, b)) [a, b] = [b, a];
+  const n = editor.selFin ? 'la letra seleccionada' : 'esta palabra';
+  if (!confirm(`¿Eliminar ${n} con sus acordes? Se puede deshacer volviendo a importar la canción, no hay deshacer aquí.`)) return;
+  editor.selIni = editor.selFin = null;
+  await guardarEditor(eliminarTramo(editor.cho, a, b)); renderEditor();
+};
 $('#ed-definir').onclick = async () => {
   const nombre = nombreElegido(); if (!nombre) return aviso('elige o escribe un nombre');
   const L = lineasCuerpo();
@@ -563,7 +564,7 @@ $('#ed-definir').onclick = async () => {
   await guardarEditor(L.join('\n')); renderEditor();
 };
 // ---------- pestaña Acordes: mover, cambiar, agregar y quitar acordes sobre la letra ----------
-const edA = { sel: null, destino: null, historial: [], lineaNueva: null }; // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
+const edA = { sel: null, destino: null, historial: [], lineaNueva: null, duplicar: false }; // duplicar: el siguiente toque en una palabra pone una copia del acorde seleccionado, sin quitar el original // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
 function piezasLinea(raw) {
   const out = []; let i = 0;
   while (i < raw.length) {
@@ -612,7 +613,7 @@ function renderEditorAcordes() {
   const estado = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
   $('#edA-estado').textContent = estado === 'corregida' ? '✓ Corregida (volver a "importada")' : 'Marcar como corregida';
   $('#edA-estado').className = estado === 'corregida' ? '' : 'primario';
-  if (edA.sel) $('#edA-nombre-sel').textContent = edA.sel.texto;
+  if (edA.sel) { $('#edA-nombre-sel').textContent = edA.sel.texto; $('#edA-sel-ayuda').textContent = edA.duplicar ? 'toca la palabra donde va la copia' : 'toca la palabra destino para moverlo'; $('#edA-duplicar').classList.toggle('primario', edA.duplicar); }
 }
 async function guardarAcordes(nuevoCho) {
   edA.historial.push(editor.cho); if (edA.historial.length > 50) edA.historial.shift();
@@ -634,14 +635,18 @@ function mostrarLetras(destino, paraAgregar) {
   }
   // "al final de la palabra": el acorde cae en el espacio entre esta palabra y la siguiente (o al final de la línea)
   const bf = boton('al final de la palabra', () => elegirPosicion(destino.l, destino.fin)); bf.className = 'fin'; bf.dataset.idx = destino.fin; cont.append(bf);
-  $('#edA-letras-ayuda').textContent = paraAgregar ? '¿Antes de qué letra va el acorde nuevo?' : `¿Antes de qué letra va ${edA.sel.texto}?`;
+  $('#edA-letras-ayuda').textContent = paraAgregar ? '¿Antes de qué letra va el acorde nuevo?' : edA.duplicar ? `¿Antes de qué letra va la copia de ${edA.sel.texto}?` : `¿Antes de qué letra va ${edA.sel.texto}?`;
   $('#edA-agregar-fila').hidden = !paraAgregar;
   const chips = $('#edA-chips'); chips.innerHTML = '';
   if (paraAgregar) for (const a of acordesUsados()) chips.append(boton(a, () => { $('#edA-agregar-txt').value = a; }));
 }
 let posElegida = null;
 function elegirPosicion(l, idx) {
-  if (edA.sel) { // mover
+  if (edA.sel && edA.duplicar) { // duplicar: copia del acorde en la posición elegida, el original se queda
+    const L = lineasCuerpo(); L[l] = L[l].slice(0, idx) + `[${edA.sel.texto}]` + L[l].slice(idx);
+    edA.sel = null; edA.destino = null; edA.duplicar = false;
+    guardarAcordes(L.join('\n'));
+  } else if (edA.sel) { // mover
     const L = lineasCuerpo(); const s = edA.sel; const texto = `[${s.texto}]`;
     let raw = L[s.l]; L[s.l] = raw.slice(0, s.ini) + raw.slice(s.fin);
     if (l === s.l && idx > s.ini) idx -= (s.fin - s.ini);
@@ -683,7 +688,7 @@ $('#edA-cancion').addEventListener('click', e => {
   const mas = e.target.closest('.mas-linea');
   if (mas) { const l = Number(mas.dataset.l); mostrarAgregarLinea(l, mas.closest('.linea').classList.contains('solo-acordes')); return; }
   const ac = e.target.closest('.ac'); const pal = e.target.closest('.pal');
-  if (ac && ac.textContent) { edA.sel = { l: Number(ac.dataset.l), ini: Number(ac.dataset.ini), fin: Number(ac.dataset.fin), texto: ac.textContent }; edA.destino = null; renderEditorAcordes(); return; }
+  if (ac && ac.textContent) { edA.sel = { l: Number(ac.dataset.l), ini: Number(ac.dataset.ini), fin: Number(ac.dataset.fin), texto: ac.textContent }; edA.destino = null; edA.duplicar = false; renderEditorAcordes(); return; }
   if (pal) { edA.destino = { l: Number(pal.dataset.l), ini: Number(pal.dataset.ini), fin: Number(pal.dataset.fin) }; posElegida = null; renderEditorAcordes(); mostrarLetras(edA.destino, !edA.sel); }
 });
 $('#edA-cambiar').onclick = () => {
@@ -692,7 +697,15 @@ $('#edA-cambiar').onclick = () => {
   edA.sel = null; $('#edA-cambiar-txt').value = ''; guardarAcordes(L.join('\n'));
 };
 $('#edA-quitar').onclick = () => { if (!edA.sel) return; const L = lineasCuerpo(); const s = edA.sel; L[s.l] = L[s.l].slice(0, s.ini) + L[s.l].slice(s.fin); edA.sel = null; guardarAcordes(L.join('\n')); };
-$('#edA-cancelar').onclick = () => { edA.sel = null; edA.destino = null; renderEditorAcordes(); };
+// teclado (Mac): con un acorde seleccionado en la pestaña Acordes, Supr o Retroceso lo quitan; Esc cancela la selección
+document.addEventListener('keydown', ev => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  if (!$('#vista-editor').classList.contains('activa') || !$('#sub-acordes').classList.contains('activa')) return;
+  if (edA.sel && !edA.destino && (ev.key === 'Backspace' || ev.key === 'Delete')) { ev.preventDefault(); $('#edA-quitar').click(); }
+  else if (ev.key === 'Escape' && (edA.sel || edA.destino || edA.lineaNueva)) { ev.preventDefault(); $(edA.destino || edA.lineaNueva ? '#edA-letras-cancelar' : '#edA-cancelar').click(); }
+});
+$('#edA-cancelar').onclick = () => { edA.sel = null; edA.destino = null; edA.duplicar = false; renderEditorAcordes(); };
+$('#edA-duplicar').onclick = () => { if (!edA.sel) return; edA.duplicar = !edA.duplicar; renderEditorAcordes(); if (edA.duplicar) aviso('toca la palabra donde va la copia'); };
 $('#edA-letras-cancelar').onclick = () => { edA.destino = null; edA.lineaNueva = null; posElegida = null; $('#edA-agregar-txt').placeholder = 'Acorde a agregar (Am, G7…)'; renderEditorAcordes(); };
 $('#edA-deshacer').onclick = async () => { const prev = edA.historial.pop(); if (prev === undefined) return; editor.guardando = true; try { await guardarEditor(prev); } finally { editor.guardando = false; } edA.sel = null; edA.destino = null; renderEditorAcordes(); };
 $('#edA-estado').onclick = () => {
@@ -722,6 +735,49 @@ $('#ed-ns-agregar').onclick = async () => {
   else { if (pos > 0 && L[pos - 1].trim()) bloque.unshift(''); L.splice(pos, 0, ...bloque); }
   $('#ed-nueva-sec').hidden = true; $('#sub-secciones').append($('#ed-nueva-sec')); posNuevaSec = null;
   await guardarEditor(L.join('\n')); aviso('sección agregada'); renderEditor();
+};
+// editar la nota o la letra de una sección (desde su cabecera en Secciones)
+let edSec = null; // { i: línea de la marca, modo: 'nota' | 'letra' }
+function rangoSeccion(L, i) { // líneas de la sección tras su marca, sin las vacías del final
+  let j = i + 1; while (j < L.length && !RE_SEC.test(L[j]) && !RE_PARTE.test(L[j]) && !META_CAB.test(L[j])) j++;
+  let fin = j; while (fin > i + 1 && !L[fin - 1].trim()) fin--;
+  return { ini: i + 1, fin, sig: j };
+}
+function abrirEditarSeccion(i, modo, cabecera) {
+  const L = lineasCuerpo(); const r = rangoSeccion(L, i); const nombre = (L[i].match(RE_SEC) || [])[1] || 'sección sin nombre';
+  edSec = { i, modo };
+  const f = $('#ed-editar-sec'); f.hidden = false; cabecera.insertAdjacentElement('afterend', f);
+  $('#ed-es-titulo').textContent = (modo === 'nota' ? 'Nota de ' : 'Letra de ') + nombre;
+  $('#ed-es-campo-nota').hidden = modo !== 'nota'; $('#ed-es-campo-letra').hidden = modo !== 'letra';
+  if (modo === 'nota') {
+    const k = L.slice(r.ini, r.fin).findIndex(l => RE_NOTA.test(l));
+    $('#ed-es-nota').value = k >= 0 ? (L[r.ini + k].match(RE_NOTA) || [])[2] || '' : '';
+    $('#ed-es-quitar').hidden = k < 0; $('#ed-es-nota').focus();
+  } else {
+    $('#ed-es-letra').value = L.slice(r.ini, r.fin).join('\n'); $('#ed-es-quitar').hidden = true; $('#ed-es-letra').focus();
+  }
+}
+function cerrarEditarSeccion() { $('#ed-editar-sec').hidden = true; $('#sub-secciones').append($('#ed-editar-sec')); edSec = null; }
+$('#ed-es-cancelar').onclick = cerrarEditarSeccion;
+$('#ed-es-quitar').onclick = async () => {
+  if (!edSec || edSec.modo !== 'nota') return;
+  const L = lineasCuerpo(); const r = rangoSeccion(L, edSec.i);
+  const k = L.slice(r.ini, r.fin).findIndex(l => RE_NOTA.test(l)); if (k < 0) return cerrarEditarSeccion();
+  L.splice(r.ini + k, 1); cerrarEditarSeccion(); await guardarEditor(L.join('\n')); aviso('nota quitada'); renderEditor();
+};
+$('#ed-es-guardar').onclick = async () => {
+  if (!edSec) return;
+  const L = lineasCuerpo(); const r = rangoSeccion(L, edSec.i);
+  if (edSec.modo === 'nota') {
+    const nota = $('#ed-es-nota').value.trim();
+    const k = L.slice(r.ini, r.fin).findIndex(l => RE_NOTA.test(l));
+    if (k >= 0) { if (nota) L[r.ini + k] = `{nota: ${nota}}`; else L.splice(r.ini + k, 1); }
+    else if (nota) L.splice(r.ini, 0, `{nota: ${nota}}`);
+  } else {
+    const nuevas = $('#ed-es-letra').value.replace(/\r/g, '').split('\n'); while (nuevas.length && !nuevas[nuevas.length - 1].trim()) nuevas.pop();
+    L.splice(r.ini, r.fin - r.ini, ...nuevas);
+  }
+  cerrarEditarSeccion(); await guardarEditor(L.join('\n')); aviso('guardado'); renderEditor();
 };
 // sub-pestañas de la edición
 $$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').forEach(x => x.classList.toggle('activa', x === b)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + b.dataset.sub)); if (b.dataset.sub === 'acordes') renderEditorAcordes(); });
@@ -830,8 +886,10 @@ $('#ed-genero-ok').onclick = async () => {
 let impCho = '';
 function previaImportar() {
   const texto = $('#imp-texto').value; if (!texto.trim()) { aviso('pega el texto primero'); return false; }
-  impCho = textoAChordPro(texto, { titulo: $('#imp-titulo').value.trim(), artista: $('#imp-artista').value.trim() });
+  const info = {};
+  impCho = textoAChordPro(texto, { titulo: $('#imp-titulo').value.trim(), artista: $('#imp-artista').value.trim(), cejilla: $('#imp-cejilla').value.trim(), info });
   const c = parsear(impCho);
+  if (!$('#imp-cejilla').value.trim() && info.cejillaDetectada) $('#imp-cejilla').value = info.cejillaDetectada;
   // completar campos detectados y aplicar los que escribió el director
   if (!$('#imp-titulo').value.trim() && c.meta.titulo) $('#imp-titulo').value = c.meta.titulo;
   if (!$('#imp-artista').value.trim() && c.meta.artista) $('#imp-artista').value = c.meta.artista;
@@ -840,7 +898,7 @@ function previaImportar() {
   if (tono) impCho = /^\{\s*tono\s*:.*\}\s*$/mi.test(impCho) ? impCho.replace(/^\{\s*tono\s*:.*\}\s*$/mi, `{tono: ${tono}}`) : impCho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/im, `$1{tono: ${tono}}\n`);
   const c2 = parsear(impCho);
   const nAc = (impCho.match(/\[[^\]]+\]/g) || []).length, nSec = c2.secciones.filter(s => s.nombre).length;
-  $('#imp-info').textContent = `${nAc} acordes · ${nSec} secciones detectadas · ${c2.secciones.reduce((a, s) => a + s.lineas.filter(l => l.tipo === 'letra').length, 0)} líneas de letra`;
+  $('#imp-info').textContent = `${nAc} acordes · ${nSec} secciones detectadas · ${c2.secciones.reduce((a, s) => a + s.lineas.filter(l => l.tipo === 'letra').length, 0)} líneas de letra${info.cejillaAplicada ? ` · cejilla de la hoja ${info.cejillaAplicada}: acordes subidos ${info.cejillaAplicada} semitono${info.cejillaAplicada > 1 ? 's' : ''}, tono real ${c2.meta.tono || '?'}` : ''}`;
   $('#imp-cancion').innerHTML = renderCancion(c2, { vista: 'acordes' });
   $('#imp-guardar').disabled = false;
   return true;
@@ -857,7 +915,7 @@ $('#imp-guardar').onclick = async () => {
   try {
     const { id } = await api('/api/canciones', { method: 'POST', body: JSON.stringify({ cho: impCho }) });
     indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
-    $('#imp-texto').value = ''; $('#imp-titulo').value = ''; $('#imp-artista').value = ''; $('#imp-tono').value = ''; $('#imp-genero').value = ''; $('#imp-genero-nuevo').value = ''; $('#imp-genero-nuevo').hidden = true; $('#imp-cancion').innerHTML = ''; $('#imp-info').textContent = ''; $('#imp-guardar').disabled = true;
+    $('#imp-texto').value = ''; $('#imp-titulo').value = ''; $('#imp-artista').value = ''; $('#imp-tono').value = ''; $('#imp-cejilla').value = ''; $('#imp-genero').value = ''; $('#imp-genero-nuevo').value = ''; $('#imp-genero-nuevo').hidden = true; $('#imp-cancion').innerHTML = ''; $('#imp-info').textContent = ''; $('#imp-guardar').disabled = true;
     aviso('canción guardada');
     await abrirEditor(id);
     document.querySelector('.subtabs button[data-sub="acordes"]').click();

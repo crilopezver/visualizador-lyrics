@@ -56,6 +56,7 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 #cancion .seg{display:inline-block;vertical-align:bottom;white-space:pre}
 #cancion .ac{display:block;color:var(--acorde);font-weight:800;font-size:.9em;line-height:1.1;min-height:1.1em}
 #cancion .tx{display:block}
+#cancion .seg.cola .ac,#cancion .seg.antes-ac .ac{padding-right:.4em} /* acordes seguidos (vo[Gm]z[G7], voz[Gm][G7]) no se pegan */
 #cancion .linea.solo-acordes .ac{font-size:1em}
 #cancion .linea.solo-acordes .tx{display:none}
 #cancion .linea.solo-acordes .seg{margin-right:.7em}
@@ -201,3 +202,5 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 /* enlace al panel de la Mac (pestaña Yo, solo en localhost) */
 #panel-mac{margin:1rem 0}
 #panel-mac a{display:block;text-align:center;background:var(--acorde);color:#000;font-weight:800;text-decoration:none;border-radius:999px;padding:.9rem 1.2rem;font-size:1.05rem}
+#ed-editar-sec{border-color:#8fb4ff}
+#ed-editar-sec textarea{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:1rem;background:#000;color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:.5rem}

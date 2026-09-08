@@ -106,10 +106,13 @@ function renderLinea(segs, desplazamiento, bemoles, idxLinea = 0) {
   }
   let html = '', palabra = '', nPal = 0;
   const cerrar = () => { if (palabra) { html += `<span class="pal" data-l="${idxLinea}" data-p="${nPal++}">${palabra}</span>`; palabra = ''; } };
-  for (const p of piezas) {
-    if (/^\s+$/.test(p.tx)) { cerrar(); html += `<span class="esp">${p.tx}</span>`; continue; }
-    palabra += `<span class="seg"><span class="ac">${esc(p.ac)}</span><span class="tx">${esc(p.tx) || ' '}</span></span>`;
-  }
+  piezas.forEach((p, i) => {
+    if (/^\s+$/.test(p.tx)) { cerrar(); html += `<span class="esp">${p.tx}</span>`; return; }
+    // "cola": acorde sin letra debajo (al final de la palabra o de la línea).
+    // "antes-ac": el siguiente trozo de la misma palabra también trae acorde (vo[Gm]z[G7]): el acorde lleva aire a la derecha para no pegarse al siguiente.
+    const sig = piezas[i + 1]; const antesAc = p.ac && sig && sig.ac && !/^\s+$/.test(sig.tx);
+    palabra += `<span class="seg${p.ac && !p.tx ? ' cola' : ''}${antesAc ? ' antes-ac' : ''}"><span class="ac">${esc(p.ac)}</span><span class="tx">${esc(p.tx) || ' '}</span></span>`;
+  });
   cerrar();
   return html;
 }
@@ -144,7 +147,7 @@ export function renderCancion(cancion, opts = {}) {
 // --- columnas → ChordPro (importador por pegado; puerto del prototipo Python) ---
 const CHORD_TOKEN = /^\(?[A-G](?:#|b)?(?:maj|min|dim|aug|sus|add|m|M|\+|°|º)?\d*(?:\([^)]*\))?(?:sus\d|add\d|maj\d)*(?:\/[A-G](?:#|b)?)?\*?\)?$/;
 const TOKENS_OK = new Set(['|', '||', 'x2', 'x3', 'x4', '(x2)', '(x3)', '(x4)', '*', '-', '–', 'N.C.']);
-const limpiarTok = t => t.replace(/^[….·:]+|[….·:]+$/g, '');
+const limpiarTok = t => t.replace(/^[….·:]+|[….·:\-–]+$/g, ''); // 'Eb-' → 'Eb': el guion pegado no indica menor en las hojas vistas (08-sep)
 function esLineaAcordes(l) { const t = l.split(/\s+/).map(limpiarTok).filter(Boolean); return t.length > 0 && t.every(x => CHORD_TOKEN.test(x) || TOKENS_OK.has(x)); }
 function insertar(acordes, letra) {
   const pos = []; const re = /\S+/g; let m;
@@ -156,19 +159,31 @@ function insertar(acordes, letra) {
   }
   return out + letra.slice(cur);
 }
-export function textoAChordPro(texto, { titulo = '', artista = '' } = {}) {
-  const lineas = texto.replace(/\r/g, '').replace(/\t/g, '        ').split('\n');
+const ROMANOS = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12 };
+// opts.cejilla: cejilla de la hoja escrita por el director ('' = detectar; 0 = ninguna). opts.info recibe lo detectado.
+export function textoAChordPro(texto, { titulo = '', artista = '', cejilla = '', info = {} } = {}) {
+  // limpieza: caracteres invisibles o de relleno que llegan al pegar desde PDF/web; líneas sin letras ni números se descartan
+  texto = texto.replace(/\r/g, '').replace(/[\uFFFC\uFFFD\u200B-\u200F\uFEFF]/g, '').replace(/\u00A0/g, ' ').replace(/\t/g, '        ');
+  const lineas = texto.split('\n').map(l => /[A-Za-zÀ-ÿ0-9]/.test(l) ? l : '');
   const cuerpo = [];
   const noVacias = lineas.filter(l => l.trim());
   // título y artista tal como vienen en el texto (para no dejarlos como letra), aunque el director los cambie
   const tituloTexto = noVacias[0] && !esLineaAcordes(noVacias[0]) && !/^\s*\[/.test(noVacias[0]) ? noVacias[0].trim() : '';
-  const artistaTexto = tituloTexto && noVacias[1] && !esLineaAcordes(noVacias[1]) && !/^\s*(tono|afina|composi|capo|\[)/i.test(noVacias[1]) ? noVacias[1].trim().replace(/^\(|\)$/g, '') : '';
+  const artistaLinea = tituloTexto && noVacias[1] && !esLineaAcordes(noVacias[1]) && !/^\s*(tono|afina|composi|capo|\[)/i.test(noVacias[1]) ? noVacias[1].trim() : '';
+  // "(Jose Jose) III": artista entre paréntesis y cejilla en romanos (convención Ritmolatino, Paper 03)
+  let artistaTexto = '', cejillaRomana = 0;
+  if (artistaLinea) {
+    let a = artistaLinea;
+    const r = a.match(/^(.*?)[\s(]*\b(I{1,3}|IV|V|VI{1,3}|IX|X|XI|XII)\)?\s*$/);
+    if (r && r[1].trim()) { a = r[1]; cejillaRomana = ROMANOS[r[2]] || 0; }
+    artistaTexto = a.trim().replace(/^\((.*)\)$/, '$1').replace(/^\(|\)$/g, '').trim();
+  }
   const meta = { titulo: titulo || tituloTexto, artista: artista || artistaTexto };
   let consumidas = 0;
   for (let i = 0; i < lineas.length; i++) {
     const l = lineas[i].replace(/\(\s*([^()\s]+)\s*\)/g, '($1)'), s = l.trim();
     if (!s) { if (cuerpo.length && cuerpo[cuerpo.length - 1] !== '') cuerpo.push(''); continue; }
-    if (consumidas < 2 && ((tituloTexto && s === tituloTexto) || (artistaTexto && s.replace(/^\(|\)$/g, '') === artistaTexto))) { consumidas++; continue; }
+    if (consumidas < 2 && ((tituloTexto && s === tituloTexto) || (artistaLinea && s === artistaLinea))) { consumidas++; continue; }
     let m;
     if ((m = s.match(/^tono\s*:\s*(\S+)/i))) { meta.tono = m[1]; continue; }
     if ((m = s.match(/^(?:capo(?:traste)?|cejilla)\D*(\d+)/i))) { meta.cejilla = m[1]; continue; }
@@ -177,6 +192,9 @@ export function textoAChordPro(texto, { titulo = '', artista = '' } = {}) {
     if ((m = s.match(/^\[([^\]]+)\]\s*(.*)$/))) { cuerpo.push(`{seccion: ${m[1].trim()}}`); if (m[2] && esLineaAcordes(m[2])) cuerpo.push(m[2].split(/\s+/).map(t => CHORD_TOKEN.test(limpiarTok(t)) ? `[${limpiarTok(t)}]` : t).join(' ')); continue; }
     if ((m = s.match(/^(INTRO|CORO|ESTROFA|VERSO|PUENTE|FINAL|PRE-?CORO|SOLO)\b[^a-z]*$/))) { cuerpo.push(`{seccion: ${s[0] + s.slice(1).toLowerCase()}}`); continue; }
     if ((m = s.match(/^(Intro(?: y Coro)?|Coro|Puente|Final|Solo)\s*:\s*(.*)$/i))) { cuerpo.push(`{seccion: ${m[1]}}`); if (m[2] && esLineaAcordes(m[2])) cuerpo.push(m[2].split(/\s+/).map(t => CHORD_TOKEN.test(limpiarTok(t)) ? `[${limpiarTok(t)}]` : t).join(' ')); continue; }
+    if ((m = s.match(/^(Intro|Coro|Puente|Final|Solo|Pre-?coro|Estrofa(?: \d+)?|Verso(?: \d+)?)\s+(.+)$/i)) && esLineaAcordes(m[2])) { // rótulo sin dos puntos + acordes
+      cuerpo.push(`{seccion: ${m[1][0].toUpperCase() + m[1].slice(1)}}`); cuerpo.push(m[2].split(/\s+/).map(t => CHORD_TOKEN.test(limpiarTok(t)) ? `[${limpiarTok(t)}]` : t).join(' ')); continue;
+    }
     if (esLineaAcordes(l)) {
       const sig = lineas[i + 1] || '';
       if (sig.trim() && !esLineaAcordes(sig) && !/^\s*\[/.test(sig)) { cuerpo.push(insertar(l, sig)); i++; continue; }
@@ -186,9 +204,80 @@ export function textoAChordPro(texto, { titulo = '', artista = '' } = {}) {
     if (s.length <= 12 && cuerpo.length && cuerpo[cuerpo.length - 1] && !cuerpo[cuerpo.length - 1].startsWith('{') && /[a-záéíóúñ]/.test(cuerpo[cuerpo.length - 1])) { cuerpo[cuerpo.length - 1] += ' ' + s; continue; }
     cuerpo.push(l.trimEnd());
   }
+  // cejilla de la hoja: los acordes vienen como posiciones con cejilla; el archivo guarda los acordes reales (subidos N semitonos)
+  const cej = cejilla !== '' && cejilla !== null && cejilla !== undefined ? Number(cejilla) || 0 : (cejillaRomana || Number(meta.cejilla) || 0);
+  info.cejillaDetectada = cejillaRomana || Number(meta.cejilla) || 0; info.cejillaAplicada = cej;
+  delete meta.cejilla;
+  if (cej > 0) {
+    const primero = (cuerpo.join('\n').match(/\[([A-G](?:#|b)?)(m(?!aj))?/) || []);
+    if (!meta.tono && primero[1]) meta.tono = primero[1] + (primero[2] || '');
+    if (meta.tono) meta.tono = tonoTranspuesto(meta.tono, cej);
+    const bem = TONOS_BEMOL.has(meta.tono || '');
+    for (let i = 0; i < cuerpo.length; i++) if (!/^\{/.test(cuerpo[i])) cuerpo[i] = cuerpo[i].replace(/\[([^\]]+)\]/g, (_, a) => `[${transponerAcorde(a, cej, bem)}]`);
+    meta.fuente = `hoja con cejilla en el traste ${cej}; acordes subidos ${cej} semitono${cej > 1 ? 's' : ''}`;
+  }
   const cab = [];
   for (const [k, v] of Object.entries(meta)) if (v) cab.push(`{${k}: ${v}}`);
   cab.push('{estado: importada}', '');
   while (cuerpo.length && cuerpo[cuerpo.length - 1] === '') cuerpo.pop();
   return cab.concat(cuerpo).join('\n') + '\n';
 }
+
+// --- eliminar una sección completa (marca + letra + acordes) desde el editor de Secciones ---
+// indiceLinea: línea del archivo con la marca {seccion: X}. Borra hasta la siguiente marca de sección o parte.
+// Si ese nombre ya no existe en ninguna otra sección, también sale del {arreglo}.
+export function eliminarSeccion(cho, indiceLinea) {
+  const L = cho.replace(/\r/g, '').split('\n');
+  const RE_S = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i, RE_P = /^\{\s*parte\s*:/i;
+  const m = (L[indiceLinea] || '').match(RE_S); if (!m) return cho;
+  const nombre = m[1];
+  let j = indiceLinea + 1; while (j < L.length && !RE_S.test(L[j]) && !RE_P.test(L[j])) j++;
+  L.splice(indiceLinea, j - indiceLinea);
+  for (let k = L.length - 1; k > 0; k--) if (!L[k].trim() && !L[k - 1].trim()) L.splice(k, 1); // sin dobles vacías
+  const quedan = new Set(L.map(l => (l.match(RE_S) || [])[1]).filter(Boolean));
+  let out = L.join('\n');
+  const a = out.match(/^\{\s*arreglo\s*:\s*(.*?)\s*\}\s*$/im);
+  if (a && nombre && !quedan.has(nombre)) {
+    const arr = a[1].split(',').map(x => x.trim()).filter(x => x && x !== nombre);
+    out = out.replace(/^\{\s*arreglo\s*:.*\}\s*$\n?/im, arr.length ? `{arreglo: ${arr.join(', ')}}\n` : '');
+  }
+  return out;
+}
+
+// --- palabras de una línea cruda del archivo: {ini, fin, texto}; ini incluye los acordes pegados delante de la palabra ---
+export function palabrasCrudas(raw) {
+  const out = []; let i = 0; const n = raw.length; let enPalabra = false, iniPal = 0, texto = '', bracketPrevio = null;
+  while (i < n) {
+    const ch = raw[i];
+    if (ch === '[') { const j = raw.indexOf(']', i); const cierre = j < 0 ? n - 1 : j; if (!enPalabra && bracketPrevio === null) bracketPrevio = i; i = cierre + 1; continue; }
+    if (/\s/.test(ch)) { if (enPalabra) { out.push({ ini: iniPal, fin: i, texto }); enPalabra = false; texto = ''; } bracketPrevio = null; i++; continue; }
+    if (!enPalabra) { enPalabra = true; iniPal = bracketPrevio !== null ? bracketPrevio : i; texto = ''; }
+    texto += ch; i++;
+  }
+  if (enPalabra) out.push({ ini: iniPal, fin: n, texto });
+  return out;
+}
+
+// --- eliminar un tramo de letra (con sus acordes) entre dos palabras: a = {i, w} primera, b = {i, w} última (i = línea del archivo, w = palabra) ---
+// Las marcas {seccion}, {nota}, etc. dentro del tramo se conservan; las líneas de letra que quedan vacías se quitan.
+export function eliminarTramo(cho, a, b) {
+  const L = cho.replace(/\r/g, '').split('\n');
+  if (!L[a.i] || !L[b.i]) return cho;
+  const pa = palabrasCrudas(L[a.i]), pb = palabrasCrudas(L[b.i]);
+  if (!pa[a.w] || !pb[b.w]) return cho;
+  const tocadas = new Set();
+  if (a.i === b.i) { L[a.i] = (L[a.i].slice(0, pa[a.w].ini) + ' ' + L[a.i].slice(pb[b.w].fin)).replace(/\s{2,}/g, ' ').trim(); tocadas.add(a.i); }
+  else {
+    L[a.i] = L[a.i].slice(0, pa[a.w].ini).trimEnd(); tocadas.add(a.i);
+    L[b.i] = L[b.i].slice(pb[b.w].fin).trimStart(); tocadas.add(b.i);
+    for (let k = a.i + 1; k < b.i; k++) if (!/^\s*\{/.test(L[k])) { L[k] = ''; tocadas.add(k); }
+  }
+  const out = [];
+  for (let k = 0; k < L.length; k++) {
+    if (tocadas.has(k) && !L[k].trim()) continue; // línea de letra que quedó vacía
+    if (!L[k].trim() && out.length && !out[out.length - 1].trim()) continue; // sin dobles vacías
+    out.push(L[k]);
+  }
+  return out.join('\n');
+}
+
