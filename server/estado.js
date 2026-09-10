@@ -5,17 +5,19 @@ export class Estado {
     const guardado = almacen.leerEstado();
     this.vivo = guardado?.vivo || { cancion: null, seccion: 0, frac: 0 };
     this.siguiente = guardado?.siguiente || [];
+    this.historial = guardado?.historial || []; // canciones ya tocadas en el vivo (la más reciente al final), como el historial de un reproductor
     this.controlCantante = guardado?.controlCantante ?? false;
     this.tonos = guardado?.tonos || {}; // tono de la banda por canción: semitonos respecto al original (decide el director)
     this.conectados = new Map(); // ws -> {nombre, rol, instrumento}
   }
   persistir() {
-    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, controlCantante: this.controlCantante, tonos: this.tonos });
+    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, historial: this.historial, controlCantante: this.controlCantante, tonos: this.tonos });
   }
   snapshot() {
     return {
       vivo: this.vivo,
       siguiente: this.siguiente,
+      historial: this.historial,
       controlCantante: this.controlCantante,
       tonos: this.tonos,
       marca: this.marca && Date.now() - this.marca.t < 6000 ? this.marca : null,
@@ -24,6 +26,10 @@ export class Estado {
   }
   puedeMoverVivo(rol) { return rol === 'director' || (rol === 'cantante' && this.controlCantante); }
   puedeCola(rol) { return rol === 'director' || rol === 'cantante'; }
+  // La canción que sale del vivo entra al historial (máximo 50). Se llama ANTES de cambiar this.vivo.cancion.
+  recordarVivo() { if (this.vivo.cancion) { this.historial.push(this.vivo.cancion); if (this.historial.length > 50) this.historial.shift(); } }
+  // Cada vez que entra una canción al vivo (aunque sea la misma repetida) sube este contador: los clientes lo usan para saber que es una carga nueva y volver al inicio.
+  ponerEnVivo(cancion, clienteId) { this.vivo = { cancion, seccion: 0, frac: 0, por: clienteId, carga: (this.vivo.carga || 0) + 1 }; }
 
   // Devuelve true si el estado cambió.
   aplicar(msg, rol, clienteId = null) {
@@ -31,7 +37,7 @@ export class Estado {
       case 'vivo': {
         if (!this.puedeMoverVivo(rol)) return false;
         this.vivo.por = clienteId; // quién movió: ese cliente ignora su propio eco
-        if (msg.cancion !== undefined) { this.vivo.cancion = msg.cancion; this.vivo.seccion = 0; this.vivo.frac = 0; }
+        if (msg.cancion !== undefined) { this.recordarVivo(); this.ponerEnVivo(msg.cancion, clienteId); }
         if (typeof msg.seccion === 'number' && msg.seccion >= 0) { this.vivo.seccion = Math.floor(msg.seccion); this.vivo.frac = 0; }
         if (typeof msg.frac === 'number') this.vivo.frac = Math.max(0, Math.min(1, msg.frac));
         this.vivo.paso = ['seccion', 'pagina', 'lineas'].includes(msg.paso) ? msg.paso : 'deslizar'; // cómo se movió quien controla (los demás ajustan la letra solo si fue por sección)
@@ -49,7 +55,17 @@ export class Estado {
         } else if (accion === 'pasar') {
           // la primera de la cola pasa al vivo (solo quien puede mover el vivo)
           if (!this.puedeMoverVivo(rol) || !this.siguiente.length) return false;
-          this.vivo = { cancion: this.siguiente.shift(), seccion: 0, frac: 0, por: clienteId };
+          this.recordarVivo();
+          this.ponerEnVivo(this.siguiente.shift(), clienteId);
+        } else if (accion === 'anterior') {
+          // vuelve a la última tocada (como "pista anterior" de un reproductor): la actual pasa al frente de la cola para poder retomarla con "siguiente canción"
+          if (!this.puedeMoverVivo(rol) || !this.historial.length) return false;
+          const previa = this.historial.pop();
+          if (this.vivo.cancion) this.siguiente.unshift(this.vivo.cancion);
+          this.ponerEnVivo(previa, clienteId);
+        } else if (accion === 'vaciar-historial') {
+          if (rol !== 'director') return false;
+          this.historial = [];
         } else return false;
         this.persistir(); return true;
       }

@@ -14,7 +14,7 @@ if (new URLSearchParams(location.search).get('director') === '1') {
   history.replaceState(null, '', location.pathname);
 }
 let indice = [];                 // [{id,titulo,artista,tono,...}]
-let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], controlCantante: false, tonos: {}, conectados: [] };
+let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], historial: [], controlCantante: false, tonos: {}, conectados: [] };
 let rol = 'musico';              // rol confirmado por el servidor
 let ws = null, conectado = false, reintento = 1000;
 const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
@@ -74,7 +74,9 @@ function programarReintento() { setTimeout(conectar, reintento); reintento = Mat
 // ---------- estado compartido ----------
 function aplicarEstado(e) {
   const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
+  const cargaAntes = estado.vivo.carga;
   estado = e;
+  if (!Array.isArray(e.historial)) e.historial = [];
   $('#n-siguiente').textContent = e.siguiente.length || '';
   if (mostrando.id && transpBanda(mostrando.id) !== tonoAntes) mostrando.pintadoId = null; // cambió el tono de la banda: repintar
   if (e.marca && e.marca.por !== clienteId && e.marca.t !== ultimaMarcaT && mostrando.id === e.vivo.cancion) { ultimaMarcaT = e.marca.t; setTimeout(() => mostrarMarca(e.marca), 50); }
@@ -82,15 +84,17 @@ function aplicarEstado(e) {
     modo = puedeMover() ? 'lider' : 'siguiendo';
     if (e.vivo.cancion) {
       // quien movió el vivo ignora su propio eco (ya está ahí); todos los demás se desplazan
-      const esMiEco = e.vivo.por === clienteId && mostrando.id === e.vivo.cancion;
-      mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0, desplazar: !esMiEco });
+      // una carga nueva en el vivo (el contador `carga` del servidor sube) siempre lleva al inicio, aunque sea la misma canción repetida (antes se quedaba al final)
+      const cargaNueva = e.vivo.carga !== cargaAntes;
+      const esMiEco = !cargaNueva && e.vivo.por === clienteId && mostrando.id === e.vivo.cancion;
+      mostrar(e.vivo.cancion, e.vivo.seccion, { frac: e.vivo.frac || 0, desplazar: !esMiEco, nueva: cargaNueva });
     } else vaciarVivo();
   } else if (mostrando.id && mostrando.pintadoId === null) pintar(); // en libre, refleja el cambio de tono
   // repintar listas solo si cambió algo que las afecte (evita romper un toque en curso)
   const firmaBib = [rol, puedeMover(), puedeCola(), e.vivo.cancion].join('|');
   if (firmaBib !== ultimaFirmaBib) { ultimaFirmaBib = firmaBib; renderBiblioteca(); }
-  const firmaCola = [rol, puedeMover(), puedeCola(), e.siguiente.join(',')].join('|');
-  if (firmaCola !== ultimaFirmaCola) { ultimaFirmaCola = firmaCola; renderSiguiente(); }
+  const firmaCola = [rol, puedeMover(), puedeCola(), e.siguiente.join(','), e.historial.join(',')].join('|');
+  if (firmaCola !== ultimaFirmaCola) { ultimaFirmaCola = firmaCola; renderSiguiente(); if (mostrando.id && mostrando.pintadoId === mostrando.id) pintarSigue(); } // la ficha "Sigue / Fin de la cola" del vivo se actualiza con la cola, no solo al cambiar de canción
   renderConectados(); actualizarControles();
   const chk = $('#chk-cantante'); if (chk) chk.checked = !!e.controlCantante;
   const bc = $('#btn-cantante'); if (bc) { bc.classList.toggle('activo', !!e.controlCantante); bc.textContent = e.controlCantante ? '🎤 sí' : '🎤 no'; } // acceso rápido en la barra fija (director)
@@ -141,27 +145,37 @@ function scrollDePosicion(seccion, frac) {
   const top = el.getBoundingClientRect().top + window.scrollY;
   return Math.max(0, top + frac * el.offsetHeight - topBarra());
 }
-async function mostrar(id, seccion = 0, { desplazar = true, frac = 0 } = {}) {
+let mostrarTurno = 0; // si llegan varias órdenes de mostrar mientras una canción se descarga, solo la última se aplica
+async function mostrar(id, seccion = 0, { desplazar = true, frac = 0, nueva = false } = {}) {
   if (!id) return vaciarVivo();
+  const turno = ++mostrarTurno;
+  const cambioCancion = nueva || mostrando.id !== id; // `nueva`: carga nueva en el vivo aunque sea la misma canción
   try {
     if (mostrando.id !== id || !mostrando.expandidas) {
       const cho = await obtenerCho(id);
+      if (turno !== mostrarTurno) return; // llegó una orden más nueva: esta se descarta
       if (mostrando.id !== id) cerrarNota();
       mostrando.id = id; mostrando.cancion = parsear(cho);
       mostrando.expandidas = await expandirConPartes(mostrando.cancion);
+      if (turno !== mostrarTurno) return;
     }
     mostrando.seccion = Math.max(0, Math.min(seccion, mostrando.expandidas.length - 1));
     mostrando.frac = frac;
     if (mostrando.pintadoId !== id) pintar(); else marcarSeccion(mostrando.seccion);
     ajustarLetra();
-    if (desplazar) { void $('#cancion').offsetHeight; /* fuerza layout */ scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac)); }
+    if (desplazar) {
+      void $('#cancion').offsetHeight; /* fuerza layout */
+      // canción nueva: página nueva. Salto instantáneo (sin animación desde el final de la anterior) y el toque que la trajo ya no cuenta como gesto de scroll
+      if (cambioCancion) { ultimoGesto = 0; scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac), { instantaneo: true }); }
+      else scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac));
+    }
   } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
 }
 let scrollObjetivo = 0; // destino del último desplazamiento automático (si aún no terminó, los cálculos parten de ahí)
-function scrollA(top) {
+function scrollA(top, { instantaneo = false } = {}) {
   scrollObjetivo = top;
   scrollProgramatico = true; clearTimeout(tScrollProg);
-  const lejos = Math.abs(top - window.scrollY) > window.innerHeight * 0.9;
+  const lejos = !instantaneo && Math.abs(top - window.scrollY) > window.innerHeight * 0.9;
   window.scrollTo({ top, behavior: lejos ? 'smooth' : 'auto' });
   tScrollProg = setTimeout(() => { scrollProgramatico = false; }, lejos ? 1200 : 250);
 }
@@ -189,7 +203,8 @@ let ajusteActual = 1;
 function ajustarLetra() {
   const root = document.documentElement;
   const poner = k => { if (k !== ajusteActual) { ajusteActual = k; root.style.setProperty('--ajuste', k); void $('#cancion').offsetHeight; } };
-  const porSeccion = modo === 'lider' ? (perfil.paso === 'seccion' || perfil.vista === 'estructura') : (modo === 'siguiendo' && estado.vivo && estado.vivo.paso === 'seccion');
+  // quien controla: según cómo se movió de verdad (botón/pedal por sección o desde Estructura), nunca por la configuración ni deslizando; quien sigue: según cómo se movió quien controla
+  const porSeccion = modo === 'lider' ? pasoPropio === 'seccion' : (modo === 'siguiendo' && estado.vivo && estado.vivo.paso === 'seccion');
   const activo = perfil.ajustar !== false && perfil.vista !== 'estructura' && mostrando.expandidas && porSeccion;
   if (!activo) return poner(1);
   const sec = $(`#cancion [data-sec="${mostrando.seccion}"]`); if (!sec) return poner(1);
@@ -222,16 +237,24 @@ function pintar() {
   const art = $('#cancion');
   art.className = 'vista-' + perfil.vista;
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: mostrando.seccion, secciones: mostrando.expandidas });
-  // cuál sigue
-  const sig = estado.siguiente[0];
-  $('#vivo-sigue').textContent = sig ? `Sigue: ${titulo(sig)}` : '';
-  art.insertAdjacentHTML('beforeend', sig
-    ? `<div class="sigue-card">Sigue<b>${esc(titulo(sig))}${artista(sig) ? ' · ' + esc(artista(sig)) : ''}</b>${puedeMover() ? '<button class="btn-pasar">▶▶ Pasar a esta canción</button>' : ''}</div>`
-    : `<div class="sigue-card">Fin de la cola${puedeMover() ? '<b>Agrega canciones en “Canciones” o carga un setlist</b>' : ''}</div>`);
+  pintarSigue();
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 }
+// Cuál sigue: cabecera + ficha al final de la letra. Se repinta sola cuando cambia la cola (sin repintar la canción ni mover el scroll).
+function pintarSigue() {
+  const art = $('#cancion'); if (!mostrando.cancion) return;
+  const sig = estado.siguiente[0];
+  $('#vivo-sigue').textContent = sig ? `Sigue: ${titulo(sig)}` : '';
+  const html = sig
+    ? `<div class="sigue-card">Sigue<b>${esc(titulo(sig))}${artista(sig) ? ' · ' + esc(artista(sig)) : ''}</b>${puedeMover() ? '<button class="btn-pasar">▶▶ Pasar a esta canción</button>' : ''}</div>`
+    : `<div class="sigue-card">Fin de la cola${puedeMover() ? '<b>Agrega canciones en “Canciones” o carga un setlist</b>' : ''}</div>`;
+  const vieja = art.querySelector('.sigue-card');
+  if (vieja) vieja.outerHTML = html; else art.insertAdjacentHTML('beforeend', html);
+}
 // Navegación por páginas (estilo lector): avanza ~80 % de la pantalla. La sincronía viaja como sección + fracción.
+let pasoPropio = 'deslizar'; // cómo se movió por última vez este dispositivo (seccion / pagina / lineas / deslizar): el ajuste de letra del que controla solo se activa tras un paso por sección con botón o pedal (fila 107; corregido 09-sep, fila 114)
 function moverAScroll(y, paso = perfil.paso || 'pagina') {
+  pasoPropio = paso;
   const pos = posicionDeScroll(y);
   if (modo !== 'lider') { modo = 'libre'; actualizarControles(); }
   else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac, paso });
@@ -311,13 +334,14 @@ window.addEventListener('scroll', () => {
   if (!mostrando.cancion || !$('#vista-vivo').classList.contains('activa')) return;
   if (!scrollDelUsuario()) return; // desplazamiento automático (seguir al vivo, cambio de canción): no es un gesto
   if (modo === 'lider') {
-    const enviarPos = () => { const pos = posicionDeScroll(window.scrollY); mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion); enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac }); tUltimoEnvio = Date.now(); };
+    const enviarPos = () => { pasoPropio = 'deslizar'; const pos = posicionDeScroll(window.scrollY); mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion); enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac }); tUltimoEnvio = Date.now(); };
     const espera = 80 - (Date.now() - tUltimoEnvio);
     clearTimeout(tEnvioPendiente);
     if (espera <= 0) enviarPos(); else tEnvioPendiente = setTimeout(enviarPos, espera);
   } else if (modo === 'siguiendo') { modo = 'libre'; actualizarControles(); }
 }, { passive: true });
 function irASeccion(i) {
+  pasoPropio = 'seccion';
   if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0, paso: 'seccion' }); else { modo = 'libre'; actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
 }
@@ -326,6 +350,7 @@ $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; 
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
 $('#lider-pasar').onclick = () => { if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
+$('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
 document.addEventListener('keydown', ev => {
@@ -443,7 +468,25 @@ function renderSiguiente() {
     if (puedeCola()) { if (i > 0) acc.append(boton('↑', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: i - 1 }))); acc.append(boton('✕', () => enviar({ tipo: 'siguiente', accion: 'quitar', indice: i }))); }
     ol.append(li);
   });
+  renderHistorial();
 }
+// Ya tocadas: la más reciente primero. Ver / ▶ Vivo / + Cola; el director puede limpiarla (p. ej. al empezar otro toque).
+function renderHistorial() {
+  const ol = $('#lista-historial'); ol.innerHTML = '';
+  const h = [...(estado.historial || [])].reverse();
+  $('#historial-vacio').hidden = h.length > 0;
+  $('#historial-acciones').hidden = !(rol === 'director' && h.length);
+  h.forEach((id, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="info"><div class="t">${esc(titulo(id))}</div><div class="s">${esc([i === 0 ? 'última tocada' : '', artista(id)].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
+    const acc = li.querySelector('.acc');
+    acc.append(boton('Ver', () => verLibre(id)));
+    if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: id }); irA('vivo'); }, 'primario'));
+    if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: id }); aviso('agregada a la cola'); }));
+    ol.append(li);
+  });
+}
+$('#historial-limpiar').onclick = () => { if (confirm('¿Limpiar el historial de canciones tocadas?')) enviar({ tipo: 'siguiente', accion: 'vaciar-historial' }); };
 $('#siguiente-vaciar').onclick = () => { if (confirm('¿Vaciar la cola?')) enviar({ tipo: 'siguiente', accion: 'vaciar' }); };
 $('#siguiente-guardar').onclick = async () => {
   const nombre = prompt('Nombre del setlist (ej. “Sábado Pueblo Café”):'); if (!nombre) return;

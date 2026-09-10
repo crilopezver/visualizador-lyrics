@@ -50,6 +50,7 @@
     </div>
     <div id="controles-lider" hidden>
       <button id="btn-cantante" class="mini" hidden title="El cantante puede manejar el vivo (un solo control a la vez). Se guarda al instante.">🎤</button>
+      <button id="lider-anterior" class="mini" title="Canción anterior: vuelve a la última tocada y la actual pasa al frente de la cola">◀◀</button>
       <button id="lider-prev">▲ atrás</button>
       <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
       <button id="lider-next">▼ avanzar</button>
@@ -65,6 +66,10 @@
       <button id="siguiente-guardar">💾 Guardar como setlist</button>
       <button id="siguiente-vaciar" class="peligro">Vaciar cola</button>
     </div>
+    <h3>Ya tocadas <small class="tenue">la última primero · ◀◀ en el vivo vuelve a la última</small></h3>
+    <ol id="lista-historial" class="lista"></ol>
+    <p class="vacio" id="historial-vacio">Todavía no pasó ninguna canción por el vivo.</p>
+    <div class="fila" id="historial-acciones" hidden><button id="historial-limpiar">Limpiar historial</button></div>
   </section>
 
   <!-- BIBLIOTECA -->

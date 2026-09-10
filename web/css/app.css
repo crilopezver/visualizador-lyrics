@@ -12,6 +12,7 @@ input,select,textarea{font:inherit;font-size:max(1rem,16px);color:var(--texto);b
 h2{font-size:1.1rem;margin:.2rem 0 .6rem;color:var(--tenue);font-weight:600}
 h2 small{font-weight:400;font-size:.8rem;margin-left:.4rem}
 h3{font-size:1rem;margin:1rem 0 .4rem}
+h3 small{font-weight:400;font-size:.8rem;color:var(--tenue);margin-left:.4rem}
 .pill{display:inline-block;font-size:.72rem;padding:.1rem .5rem;border-radius:999px;background:#222;color:var(--tenue);vertical-align:middle}
 .pill:empty{display:none}
 .vacio{color:var(--tenue);font-size:.9rem;padding:.6rem .2rem}
@@ -99,7 +100,7 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 
 /* formulario */
 #form-perfil label{display:block;margin:.6rem 0;color:var(--tenue);font-size:.9rem}
-#form-perfil label[hidden]{display:none}
+[hidden]{display:none!important} /* el atributo hidden manda sobre cualquier display (.fila, label…): lección de las filas 107 y 110 */
 #form-perfil input,#form-perfil select{margin-top:.25rem}
 .switch{display:flex;align-items:center;gap:.6rem}
 .switch input{width:auto;transform:scale(1.4)}
