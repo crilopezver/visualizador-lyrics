@@ -75,6 +75,7 @@
   <!-- BIBLIOTECA -->
   <section id="vista-biblioteca" class="vista">
     <input id="buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
+    <label class="orden">Ordenar por <select id="bib-orden"><option value="importada">importación (última primero)</option><option value="titulo">título</option><option value="artista">artista</option></select></label>
     <div id="bib-director" class="fila" hidden><button id="btn-importar" class="primario">+ Importar canción (pegar)</button><span style="display:none"><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></span></div>
     <div id="bib-info" class="vacio"></div>
     <ul id="lista-canciones" class="lista"></ul>
@@ -193,6 +194,10 @@
   <!-- AJUSTES / PERFIL -->
   <section id="vista-ajustes" class="vista">
     <h2>Yo</h2>
+    <div id="quien-eres" hidden>
+      <p class="ayuda">¿Quién eres? Toca tu nombre y queda guardado en este celular.</p>
+      <div id="integrantes" class="fila"></div>
+    </div>
     <form id="form-perfil">
       <label>Nombre <input name="nombre" required maxlength="40" placeholder="Cómo te llaman en la banda"></label>
       <label>Instrumento

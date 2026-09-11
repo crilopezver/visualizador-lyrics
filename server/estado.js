@@ -24,6 +24,14 @@ export class Estado {
       conectados: [...this.conectados.values()].map(c => ({ nombre: c.nombre, rol: c.rol, instrumento: c.instrumento })),
     };
   }
+  // una canción borrada sale del vivo, de la cola y del historial
+  quitarCancion(id) {
+    let cambio = false;
+    if (this.vivo.cancion === id) { this.vivo = { cancion: null, seccion: 0, frac: 0, carga: (this.vivo.carga || 0) + 1 }; cambio = true; }
+    const n1 = this.siguiente.length; this.siguiente = this.siguiente.filter(c => c !== id); if (this.siguiente.length !== n1) cambio = true;
+    const n2 = this.historial.length; this.historial = this.historial.filter(c => c !== id); if (this.historial.length !== n2) cambio = true;
+    if (cambio) this.persistir(); return cambio;
+  }
   puedeMoverVivo(rol) { return rol === 'director' || (rol === 'cantante' && this.controlCantante); }
   puedeCola(rol) { return rol === 'director' || rol === 'cantante'; }
   // La canción que sale del vivo entra al historial (máximo 50). Se llama ANTES de cambiar this.vivo.cancion.

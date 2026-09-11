@@ -71,10 +71,15 @@ const servidor = http.createServer(async (req, res) => {
       }
       if (rec === 'estado') return json(res, 200, estado.snapshot());
       if (rec === 'rol') return json(res, 200, { rol });
+      if (rec === 'integrantes') return json(res, 200, almacen.leerIntegrantes().map(i => ({ nombre: i.nombre, instrumento: i.instrumento || '', rol: i.rol || 'musico', ultimaConexion: i.ultimaConexion || null })));
       if (rec === 'canciones') {
         if (req.method === 'GET' && !id) return json(res, 200, almacen.indiceCanciones());
         if (req.method === 'GET') { const cho = almacen.leerCancion(id); return cho === null ? json(res, 404, { error: 'no existe' }) : json(res, 200, { id, cho }); }
         if (rol !== 'director') return json(res, 403, { error: 'solo el director edita canciones' });
+        if (req.method === 'DELETE' && id) { // borrar (a la papelera); sale del vivo, la cola y el historial
+          if (!almacen.eliminarCancion(id)) return json(res, 404, { error: 'no existe' });
+          estado.quitarCancion(id); difundir(); avisarCancion(id); return json(res, 200, { id, borrada: true });
+        }
         const cuerpo = await leerCuerpo(req);
         if (typeof cuerpo.cho !== 'string') return json(res, 400, { error: 'falta cho' });
         if (req.method === 'POST') { const nuevo = almacen.crearCancion(cuerpo.cho); avisarCancion(nuevo); return json(res, 201, { id: nuevo }); }
@@ -139,6 +144,8 @@ wss.on('connection', (ws, req) => {
       if ((deseado === 'director' || deseado === 'cantante') && porPin === deseado) perfil.rol = deseado;
       else if (deseado === 'director' && local) perfil.rol = 'director'; // la propia Mac
       estado.conectados.set(ws, perfil);
+      // registro de quién entró: si el nombre coincide con un integrante, se anota su última conexión (fila 126)
+      try { const lista = almacen.leerIntegrantes(); const yo = lista.find(i => String(i.nombre).trim().toLowerCase() === perfil.nombre.trim().toLowerCase()); if (yo) { yo.ultimaConexion = new Date().toISOString(); almacen.guardarIntegrantes(lista); } } catch (e) { console.error('integrantes:', e.message); }
       ws.send(JSON.stringify({ tipo: 'bienvenida', rol: perfil.rol, estado: estado.snapshot() }));
       difundir(); return;
     }

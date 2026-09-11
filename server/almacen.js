@@ -32,13 +32,21 @@ export class Almacen {
       const id = f.slice(0, -4);
       const cho = fs.readFileSync(path.join(dir, f), 'utf8');
       const meta = this.leerMeta(cho);
-      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '' };
+      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '', importada: meta.importada || '' };
     });
   }
   leerCancion(id) {
     if (!this.idValido(id)) return null;
     const ruta = path.join(this.dirCanciones(), id + '.cho');
     return fs.existsSync(ruta) ? fs.readFileSync(ruta, 'utf8') : null;
+  }
+  // Borrar: la canción no se destruye, se mueve a datos/papelera/ (recuperable a mano). Pendiente 0m (Cristhian, 10-sep).
+  eliminarCancion(id) {
+    if (!this.idValido(id)) return false;
+    const ruta = path.join(this.dirCanciones(), id + '.cho'); if (!fs.existsSync(ruta)) return false;
+    const papelera = path.join(this.raiz, 'papelera'); fs.mkdirSync(papelera, { recursive: true });
+    const sello = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    fs.renameSync(ruta, path.join(papelera, `${id}_${sello}.cho`)); return true;
   }
   guardarCancion(id, cho) {
     if (!this.idValido(id)) throw new Error('id inválido');
@@ -93,5 +101,8 @@ export class Almacen {
   // --- usuarios y estado ---
   usuarios() { return this.leerJson('usuarios.json', { director: { pin: '1234' }, cantante: { pin: '0000' } }); }
   leerEstado() { return this.leerJson('estado.json', null); }
+  // integrantes de la banda (nombre, instrumento, rol, ultimaConexion): lista fija que edita el director en datos/integrantes.json
+  leerIntegrantes() { const l = this.leerJson('integrantes.json', []); return Array.isArray(l) ? l : []; }
+  guardarIntegrantes(l) { this.guardarJson('integrantes.json', l); }
   guardarEstado(e) { this.guardarJson('estado.json', e); }
 }

@@ -1,0 +1,4 @@
+[
+  { "nombre": "Ejemplo Voz", "instrumento": "voz", "rol": "cantante" },
+  { "nombre": "Ejemplo Guitarra", "instrumento": "guitarra", "rol": "musico" }
+]

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prueba de pedal</title>
+<style>
+body{margin:0;background:#000;color:#eee;font-family:-apple-system,system-ui,sans-serif;padding:1rem}
+h1{font-size:1.1rem;color:#aaa;font-weight:600;margin:.2rem 0 .8rem}
+#grande{font-size:4rem;font-weight:800;color:#f59e0b;min-height:5rem;word-break:break-all}
+#accion{font-size:1.4rem;margin:.4rem 0 1rem}
+#accion.ok{color:#4ade80}#accion.no{color:#f87171}
+table{border-collapse:collapse;width:100%;font-size:.95rem}td,th{border-bottom:1px solid #333;padding:.4rem .3rem;text-align:left}
+input{width:100%;padding:.8rem;font-size:1rem;background:#111;color:#eee;border:1px solid #444;border-radius:8px;margin:.6rem 0}
+.ayuda{color:#888;font-size:.9rem}
+</style></head><body>
+<h1>Prueba de pedal · pisa cada interruptor</h1>
+<div id="grande">—</div>
+<div id="accion">esperando…</div>
+<input id="foco" placeholder="Si no aparece nada al pisar, toca aquí para dar foco y vuelve a pisar" autocomplete="off">
+<table><thead><tr><th>#</th><th>key</th><th>code</th><th>keyCode</th><th>modificadores</th><th>la app haría</th></tr></thead><tbody id="lista"></tbody></table>
+<p class="ayuda">Mapa actual: ↓ canción siguiente · ↑ canción anterior · ←→ por sección · AvPág Espacio Enter / RePág Retroceso según el modo de “Yo” (teclado = pedal Bluetooth).</p>
+<script>
+const MAPA={ArrowDown:'canción siguiente',ArrowUp:'canción anterior',ArrowRight:'sección siguiente',ArrowLeft:'sección anterior',PageDown:'avanzar (modo de Yo)',' ':'avanzar (modo de Yo)',Enter:'avanzar (modo de Yo)',PageUp:'atrás (modo de Yo)',Backspace:'atrás (modo de Yo)'};
+let n=0;
+document.addEventListener('keydown',e=>{
+  e.preventDefault(); n++;
+  const mods=['ctrl','shift','alt','meta'].filter(m=>e[m+'Key']).join('+')||'—';
+  const hace=MAPA[e.key]||'nada';
+  document.getElementById('grande').textContent=e.key===' '?'Espacio':e.key;
+  const a=document.getElementById('accion'); a.textContent='la app haría: '+hace; a.className=hace==='nada'?'no':'ok';
+  const tr=document.createElement('tr'); tr.innerHTML=`<td>${n}</td><td>${e.key===' '?'Espacio':e.key}</td><td>${e.code||'—'}</td><td>${e.keyCode}</td><td>${mods}</td><td>${hace}</td>`;
+  document.getElementById('lista').prepend(tr);
+});
+</script></body></html>

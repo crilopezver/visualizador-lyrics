@@ -145,8 +145,9 @@ export function renderCancion(cancion, opts = {}) {
 }
 
 // --- columnas → ChordPro (importador por pegado; puerto del prototipo Python) ---
-const CHORD_TOKEN = /^\(?[A-G](?:#|b)?(?:maj|min|dim|aug|sus|add|m|M|\+|°|º)?\d*(?:\([^)]*\))?(?:sus\d|add\d|maj\d)*(?:\/[A-G](?:#|b)?)?\*?\)?$/;
-const TOKENS_OK = new Set(['|', '||', 'x2', 'x3', 'x4', '(x2)', '(x3)', '(x4)', '*', '-', '–', 'N.C.']);
+// ø / Ø = semidisminuido (Bø, Bø7; Cristhian, 09-sep, fila 116); ° / º = disminuido; colas b5 / #5 / #11… (Bm7b5) como en el prototipo Python
+const CHORD_TOKEN = /^\(?[A-G](?:#|b)?(?:maj|min|dim|aug|sus|add|m|M|\+|°|º|ø|Ø)?\d*(?:\([^)]*\))?(?:sus\d|add\d|maj\d|b\d+|#\d+)*(?:\/[A-G](?:#|b)?)?\*?\)?$/;
+const TOKENS_OK = new Set(['|', '||', 'x2', 'x3', 'x4', '(x2)', '(x3)', '(x4)', '*', '-', '–', 'N.C.', 'Riff', 'riff', '(Riff)', '(riff)', 'bis', 'Bis', '(bis)', '(Bis)']); // anotaciones que pueden acompañar a una línea de acordes sin convertirla en letra (Riff/bis: Cristhian, fila 117)
 const limpiarTok = t => t.replace(/^[….·:]+|[….·:\-–]+$/g, ''); // 'Eb-' → 'Eb': el guion pegado no indica menor en las hojas vistas (08-sep)
 function esLineaAcordes(l) { const t = l.split(/\s+/).map(limpiarTok).filter(Boolean); return t.length > 0 && t.every(x => CHORD_TOKEN.test(x) || TOKENS_OK.has(x)); }
 function insertar(acordes, letra) {
@@ -218,6 +219,8 @@ export function textoAChordPro(texto, { titulo = '', artista = '', cejilla = '',
   }
   const cab = [];
   for (const [k, v] of Object.entries(meta)) if (v) cab.push(`{${k}: ${v}}`);
+  const hoy = new Date(); const fechaLocal = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`; // fecha local, no UTC (a las 21:00 de Lima ya es mañana en UTC)
+  cab.push(`{importada: ${fechaLocal}}`); // fecha de importación (Cristhian, 09-sep, pendiente 0k)
   cab.push('{estado: importada}', '');
   while (cuerpo.length && cuerpo[cuerpo.length - 1] === '') cuerpo.pop();
   return cab.concat(cuerpo).join('\n') + '\n';

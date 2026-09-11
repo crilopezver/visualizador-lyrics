@@ -7,7 +7,7 @@ const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getIt
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'pagina', lineas: 4, ajustar: true }); // paso: página | sección | líneas (botones y pedal)
-const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {} });
+const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {}, orden: 'importada' }); // orden: importada | titulo | artista (biblioteca)
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
   perfil.rol = 'director'; if (!perfil.nombre) perfil.nombre = 'Director (Mac)'; guardar('perfil', perfil);
@@ -45,7 +45,7 @@ function irA(vista) {
   $$('#tabs button').forEach(b => b.classList.toggle('activa', b.dataset.vista === vista));
   $$('.vista').forEach(v => v.classList.toggle('activa', v.id === 'vista-' + vista));
   if (vista === 'setlists') cargarSetlists();
-  if (vista === 'ajustes') cargarInfo();
+  if (vista === 'ajustes') { cargarInfo(); cargarIntegrantes(); }
 }
 $$('#tabs button').forEach(b => b.onclick = () => irA(b.dataset.vista));
 
@@ -356,8 +356,14 @@ $('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) ret
 document.addEventListener('keydown', ev => {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if (!$('#vista-vivo').classList.contains('activa')) return;
-  if (['ArrowDown', 'ArrowRight', 'PageDown', ' ', 'Enter'].includes(ev.key)) { ev.preventDefault(); moverSeccion(1); }
-  else if (['ArrowUp', 'ArrowLeft', 'PageUp', 'Backspace'].includes(ev.key)) { ev.preventDefault(); moverSeccion(-1); }
+  // Pedal M-Wave (Paper 09): ↓ canción siguiente y ↑ canción anterior (como ▶▶ y ◀◀ de la barra; solo quien controla el vivo),
+  // ←→ por sección siempre (Cristhian, 09-sep, filas 125 y 128); las demás teclas siguen el modo configurado en "Yo"
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); if (puedeMover() && modo === 'lider') $('#lider-pasar').onclick(); }
+  else if (ev.key === 'ArrowUp') { ev.preventDefault(); if (puedeMover() && modo === 'lider') $('#lider-anterior').onclick(); }
+  else if (ev.key === 'ArrowRight') { ev.preventDefault(); moverPorSeccion(1); }
+  else if (ev.key === 'ArrowLeft') { ev.preventDefault(); moverPorSeccion(-1); }
+  else if (['PageDown', ' ', 'Enter'].includes(ev.key)) { ev.preventDefault(); moverSeccion(1); }
+  else if (['PageUp', 'Backspace'].includes(ev.key)) { ev.preventDefault(); moverSeccion(-1); }
 });
 let toque = null, tPresion = null;
 function marcarAqui(el) {
@@ -497,18 +503,28 @@ $('#siguiente-guardar').onclick = async () => {
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function boton(txt, fn, clase = '') { const b = document.createElement('button'); b.textContent = txt; b.onclick = fn; if (clase) b.className = clase; return b; }
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const fechaImportacion = iso => { const [a, m, d] = String(iso).split('-'); return a && m && d ? `${d}-${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][Number(m) - 1] || m}-${a.slice(2)}` : iso; };
+$('#bib-orden').onchange = ev => { prefs.orden = ev.target.value; guardar('prefs', prefs); renderBiblioteca(); };
 function renderBiblioteca() {
   const q = norm($('#buscar').value.trim());
   const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q) || norm(c.genero).includes(q));
+  // orden: por fecha de importación (última primero; sin fecha al final), por título o por artista (Cristhian, 09-sep)
+  const orden = prefs.orden || 'importada'; const sel = $('#bib-orden'); if (sel && sel.value !== orden) sel.value = orden;
+  const cmpTexto = (a, b) => norm(a).localeCompare(norm(b), 'es');
+  lista.sort((a, b) => orden === 'importada' ? ((b.importada || '').localeCompare(a.importada || '') || cmpTexto(a.titulo, b.titulo)) : orden === 'artista' ? ((!a.artista) - (!b.artista) || cmpTexto(a.artista, b.artista) || cmpTexto(a.titulo, b.titulo)) : cmpTexto(a.titulo, b.titulo));
   $('#bib-info').textContent = `${lista.length} de ${indice.length} canciones`;
   $('#bib-director').hidden = rol !== 'director';
   const ul = $('#lista-canciones'); ul.innerHTML = '';
   for (const c of lista.slice(0, 300)) {
     const li = document.createElement('li'); if (c.id === estado.vivo.cancion) li.classList.add('en-vivo');
-    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.genero, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
+    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.genero, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : '', c.importada ? 'importada ' + fechaImportacion(c.importada) : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(c.id)));
     if (rol === 'director') acc.append(boton('✎', () => abrirEditor(c.id)));
+    if (rol === 'director') acc.append(boton('🗑', async () => { // borrar canción (a la papelera del servidor); pendiente 0m
+      if (!confirm(`¿Borrar “${c.titulo}”? Sale de la biblioteca, de la cola y del historial. Queda una copia en datos/papelera.`)) return;
+      try { await api(`/api/canciones/${c.id}`, { method: 'DELETE' }); cacheCho.delete(c.id); await cargarIndice(); renderBiblioteca(); aviso('canción borrada'); } catch (e) { aviso('no se borró: ' + e.message); }
+    }, 'peligro'));
     if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id }); aviso('agregada a Siguiente'); }));
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: c.id }); irA('vivo'); }, 'primario'));
     ul.append(li);
@@ -550,6 +566,24 @@ $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------
+// "¿Quién eres?": lista de integrantes del servidor (datos/integrantes.json). Un toque llena nombre, instrumento y rol y guarda;
+// director y cantante además escriben su PIN. Sirve aunque el celular haya perdido el perfil (otra red, otro navegador; fila 126).
+const fechaCorta = iso => { if (!iso) return 'nunca'; const d = new Date(iso); const hoy = new Date(); const mismoDia = d.toDateString() === hoy.toDateString(); return (mismoDia ? 'hoy' : d.toLocaleDateString('es', { day: '2-digit', month: 'short' })) + ' ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); };
+async function cargarIntegrantes() {
+  const caja = $('#quien-eres'), cont = $('#integrantes'); if (!caja) return;
+  let lista = []; try { lista = await api('/api/integrantes'); } catch { lista = []; }
+  caja.hidden = !lista.length; cont.innerHTML = '';
+  for (const i of lista) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'integrante' + (perfil.nombre && perfil.nombre.toLowerCase() === String(i.nombre).toLowerCase() ? ' yo' : '');
+    b.innerHTML = `<b>${esc(i.nombre)}</b><small>${esc([i.instrumento, i.rol !== 'musico' ? i.rol : ''].filter(Boolean).join(' · '))} · última vez: ${esc(fechaCorta(i.ultimaConexion))}</small>`;
+    b.onclick = () => {
+      const f = $('#form-perfil'); f.elements.nombre.value = i.nombre; f.elements.instrumento.value = i.instrumento || 'otro'; f.elements.rol.value = i.rol || 'musico';
+      if (i.rol === 'director' || i.rol === 'cantante') { f.elements.pin.value = ''; f.elements.pin.focus(); aviso('escribe tu PIN y guarda'); return; }
+      f.requestSubmit(); aviso(`listo, ${i.nombre}`); irA('vivo');
+    };
+    cont.append(b);
+  }
+}
 function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
 $('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
 $('#form-perfil').onsubmit = ev => {
@@ -928,10 +962,34 @@ $$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').for
 function renderArreglo() {
   const ol = $('#ed-arreglo-lista'); ol.innerHTML = '';
   editor.arreglo.forEach((n, i) => {
-    const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(n)}</div></div><div class="acc"></div>`;
+    const li = document.createElement('li'); li.dataset.i = i; li.innerHTML = `<span class="agarre" title="Arrastra para mover">≡</span><div class="info"><div class="t">${esc(n)}</div></div><div class="acc"></div>`;
     const acc = li.querySelector('.acc');
     if (i > 0) acc.append(boton('↑', () => { [editor.arreglo[i - 1], editor.arreglo[i]] = [editor.arreglo[i], editor.arreglo[i - 1]]; renderArreglo(); }));
+    if (i < editor.arreglo.length - 1) acc.append(boton('↓', () => { [editor.arreglo[i + 1], editor.arreglo[i]] = [editor.arreglo[i], editor.arreglo[i + 1]]; renderArreglo(); }));
     acc.append(boton('✕', () => { editor.arreglo.splice(i, 1); renderArreglo(); }));
+    // arrastrar con el dedo o el mouse desde el asa ≡ (Cristhian, 11-sep, fila 137): eventos pointer, funcionan en iPhone/Android/Mac
+    const agarre = li.querySelector('.agarre');
+    agarre.addEventListener('pointerdown', e => {
+      if (e.button && e.button !== 0) return;
+      e.preventDefault(); li.classList.add('arrastrando');
+      try { agarre.setPointerCapture(e.pointerId); } catch {}
+      // mover y soltar se escuchan en el documento: no dependen de que la captura del puntero funcione (en la Mac no llegaba, 11-sep)
+      const mover = ev => {
+        if (ev.pointerId !== e.pointerId) return; ev.preventDefault();
+        const bajo = document.elementFromPoint(ev.clientX, ev.clientY); const otro = bajo && bajo.closest('#ed-arreglo-lista > li');
+        if (!otro || otro === li) return;
+        const r = otro.getBoundingClientRect();
+        if (ev.clientY < r.top + r.height / 2) otro.before(li); else otro.after(li);
+      };
+      const soltar = ev => {
+        if (ev && ev.pointerId !== e.pointerId) return;
+        document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar);
+        li.classList.remove('arrastrando');
+        editor.arreglo = [...ol.querySelectorAll('li[data-i]')].map(x => editor.arreglo[Number(x.dataset.i)]); renderArreglo();
+      };
+      document.addEventListener('pointermove', mover, { passive: false });
+      document.addEventListener('pointerup', soltar); document.addEventListener('pointercancel', soltar);
+    });
     ol.append(li);
   });
   if (!editor.arreglo.length) ol.innerHTML = '<li class="vacio">Sin arreglo: se muestra en orden natural.</li>';
