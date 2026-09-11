@@ -222,6 +222,17 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #edA-cancion .menu-bloque button{font-size:.9rem;padding:.45rem .7rem}
 #edA-cancion .cortar-linea{display:inline-block;vertical-align:bottom;margin-left:.3rem;padding:0 .45rem;font-size:.85rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
 #edA-cancion .sin-usar{margin:1rem 0 .4rem}
+#edA-cancion .bloque:not(.editando){cursor:text}
+#edA-cancion .bloque.editando{border-color:var(--acorde);background:#0f0d08}
+#edA-cancion .ed-pre{font-family:ui-monospace,Menlo,Monaco,"Courier New",monospace;font-size:1rem;line-height:1.35;white-space:pre;overflow-x:auto;outline:none;padding:.3rem .2rem;min-height:2.7em;-webkit-user-select:text;user-select:text}
+#edA-cancion .ed-pre .ln{min-height:1.35em;white-space:pre}
+#edA-cancion .ed-pre .tk{display:inline;color:var(--acorde);font-weight:800;cursor:grab;touch-action:none}
+#edA-cancion .ed-pre .ln.nota{font-family:-apple-system,system-ui,sans-serif;font-size:.9em;color:var(--tenue);font-style:italic;white-space:normal;padding:.15em .4em;margin:.15em 0;border-left:3px solid var(--borde);user-select:none;-webkit-user-select:none}
+#edA-cancion .edicion-acciones{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.5rem}
+#edA-cancion .edicion-acciones .ayuda{flex:1;font-size:.8rem}
+#edA-cancion .nota[data-l]{cursor:context-menu}
+.nota-caja{margin:.4rem 0;padding:.5rem;background:var(--panel);border:1px solid var(--acorde);border-radius:10px}
+.nota-caja textarea{width:100%;box-sizing:border-box;font-size:1rem;padding:.5rem;background:#111;color:var(--texto);border:1px solid var(--borde);border-radius:8px;margin-bottom:.4rem}
 #edA-cancion .mas-linea{display:inline-block;vertical-align:bottom;margin-left:.5rem;padding:0 .5rem;font-size:.9rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
 #edA-cancion .mas-linea:active{color:var(--acorde)}
 

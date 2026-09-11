@@ -1,5 +1,5 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
-import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo } from './chordpro.js';
+import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo, lineaAHoja, hojaACuerpo, esFilaAcordes, tokensDudosos } from './chordpro.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -756,7 +756,7 @@ $('#ed-definir').onclick = async () => {
   await guardarEditor(L.join('\n')); renderEditor();
 };
 // ---------- pestaña Acordes: mover, cambiar, agregar y quitar acordes sobre la letra ----------
-const edA = { sel: null, destino: null, historial: [], lineaNueva: null, duplicar: false, menu: null, bloques: [] }; // duplicar: el siguiente toque en una palabra pone una copia del acorde seleccionado, sin quitar el original // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
+const edA = { sel: null, destino: null, historial: [], lineaNueva: null, duplicar: false, menu: null, bloques: [], editando: null }; // editando = { j, modelo: [{t:'linea', s} | {t:'nota', texto}] } // duplicar: el siguiente toque en una palabra pone una copia del acorde seleccionado, sin quitar el original // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
 function piezasLinea(raw) {
   const out = []; let i = 0;
   while (i < raw.length) {
@@ -792,24 +792,28 @@ function renderEditorAcordes() {
   if (arr.length) { const veces = {}; for (const n of arr) { const s = secs.find(x => x.nombre.toLowerCase() === n.toLowerCase()); const k = n.toLowerCase(); veces[k] = (veces[k] || 0) + 1; bloques.push({ nombre: n, sec: s || null, vez: veces[k] }); } }
   else secs.forEach(s => bloques.push({ nombre: s.nombre, sec: s, vez: 1 }));
   if (arr.length && secs[0] && secs[0].ini < 0) bloques.unshift({ nombre: '', sec: secs[0], vez: 1, suelto: true }); // texto antes de la primera sección
-  const lineaHtml = (l, primera) => {
+  // ✂ en una línea = la sección nueva empieza DESPUÉS de esa línea (Cristhian, 11-sep, fila 175); por eso no va en la última
+  const lineaHtml = (l, siguiente) => {
     const raw = L[l]; let m;
-    if ((m = raw.match(RE_NOTA))) return `<div class="nota">${esc(m[2])}</div>`;
+    if ((m = raw.match(RE_NOTA))) return `<div class="nota" data-l="${l}" title="Clic derecho o pulsación larga: editar o borrar la nota">${esc(m[2])}</div>`;
     if (!raw.trim()) return '<div class="linea">&nbsp;</div>';
     const r = renderLineaEdicion(raw, l);
-    return `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}<button class="mas-linea" data-l="${l}" title="${r.soloAcordes ? 'Agregar acordes a esta línea' : 'Agregar una línea solo de acordes debajo'}">＋</button>${primera ? '' : `<button class="cortar-linea" data-l="${l}" title="Cortar aquí: empieza una sección nueva en esta línea">✂</button>`}</div>`;
+    return `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}${siguiente === null ? '' : `<button class="cortar-linea" data-l="${siguiente}" title="Cortar debajo de esta línea: lo que sigue pasa a una sección nueva">✂</button>`}</div>`;
   };
   bloques.forEach((b, j) => {
     const titulo = b.suelto ? 'sin sección' : (b.nombre || 'sección sin nombre') + (b.vez > 1 ? ` · ${b.vez}ª vez` : '');
-    html += `<div class="bloque" data-j="${j}"><div class="bloque-cab">${b.suelto ? '' : `<span class="agarre agarre-bloque" title="Arrastra para mover esta sección">≡</span>`}<div class="nombre">${esc(titulo)}</div>${b.suelto ? '' : `<button class="mas-bloque" data-j="${j}" title="Opciones de esta sección">⋯</button>`}</div>`;
-    if (!b.sec) html += `<div class="nota">esta sección está en el arreglo pero no existe en la canción</div>`;
-    else { let primera = true; for (const l of b.sec.lineas) { if (L[l].trim() && !RE_NOTA.test(L[l])) { html += lineaHtml(l, primera); primera = false; } else html += lineaHtml(l, true); } }
+    const editando = edA.editando && edA.editando.j === j;
+    html += `<div class="bloque ${editando ? 'editando' : ''}" data-j="${j}" title="${editando ? '' : 'Toca para editar esta sección como texto'}"><div class="bloque-cab">${b.suelto ? '' : `<span class="agarre agarre-bloque" title="Arrastra para mover esta sección">≡</span>`}<div class="nombre">${esc(titulo)}</div>${b.suelto ? '' : `<button class="mas-bloque" data-j="${j}" title="Opciones de esta sección">⋯</button>`}</div>`;
+    if (editando) html += `<div class="edicion"><div class="ed-pre" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off">${htmlModelo(edA.editando.modelo)}</div><div class="edicion-acciones"><span class="ayuda">Acordes arriba, letra abajo; muévelos con espacios o arrastrándolos. Clic derecho o pulsación larga: nota.</span><button class="ed-listo primario">✓ Listo</button><button class="ed-cancelar">Cancelar</button></div></div>`;
+    else if (!b.sec) html += `<div class="nota">esta sección está en el arreglo pero no existe en la canción</div>`;
+    else { const contenido = b.sec.lineas.filter(l => L[l].trim() && !RE_NOTA.test(L[l])); for (const l of b.sec.lineas) { const k = contenido.indexOf(l); html += lineaHtml(l, k >= 0 && k < contenido.length - 1 ? contenido[k + 1] : null); } }
     html += '</div>';
   });
   const usados = new Set(bloques.map(b => b.nombre.toLowerCase())); const sinUsar = secs.filter(s => s.nombre && !usados.has(s.nombre.toLowerCase()));
   if (sinUsar.length) html += `<div class="sin-usar"><div class="ayuda">Secciones definidas que no están en el arreglo (toca una para agregarla al final):</div><div class="chips">${sinUsar.map(s => `<button class="usar-seccion" data-nombre="${esc(s.nombre)}">+ ${esc(s.nombre)}</button>`).join('')}</div></div>`;
   art.innerHTML = html;
   edA.bloques = bloques;
+  if (edA.editando) { const pre = art.querySelector('.bloque.editando .ed-pre'); if (pre) { prepararPre(pre); if (edA.editando.caret) ponerCaret(pre, edA.editando.caret.linea, edA.editando.caret.col); else pre.focus(); } }
   // arrastrar bloques desde el asa ≡ (eventos en el documento, con desplazamiento automático cerca de los bordes); al soltar, el orden en pantalla pasa al arreglo
   art.querySelectorAll('.agarre-bloque').forEach(asa => asa.addEventListener('pointerdown', e => {
     if (e.button && e.button !== 0) return; e.preventDefault();
@@ -891,6 +895,153 @@ function cortarEn(l) { // una sección nueva empieza en la línea l (índice de 
   if (arr.length && cont && cont.nombre) { const out = []; for (const x of arr) { out.push(x); if (x.toLowerCase() === cont.nombre.toLowerCase()) out.push(nombre); } arr = out; }
   edA.menu = null; guardarAcordes(conArreglo(L.join('\n'), arr));
 }
+// ---------- edición de un bloque como texto (Cristhian, 11-sep, filas 169-171): monoespaciado, acordes en naranja, sin marcas ----------
+const NBSP = / /g;
+function htmlModelo(modelo) {
+  return modelo.map((it, k) => it.t === 'nota'
+    ? `<div class="ln nota" contenteditable="false" data-k="${k}" title="Clic derecho o pulsación larga: editar o borrar">${esc(it.texto)}</div>`
+    : `<div class="ln" data-k="${k}">${it.s ? resaltarFila(it.s) : '<br>'}</div>`).join('');
+}
+function resaltarFila(s) { // una fila de acordes se pinta token a token en naranja; el resto, tal cual
+  if (!esFilaAcordes(s)) return esc(s);
+  let html = ''; const re = /\S+|\s+/g; let m, i = 0;
+  while ((m = re.exec(s))) { html += /\S/.test(m[0]) ? `<span class="tk" data-i="${i++}">${esc(m[0])}</span>` : esc(m[0]); }
+  return html;
+}
+function leerModelo(pre, modeloPrevio) { // el DOM editado → modelo (las notas se conservan por su índice previo)
+  const out = [];
+  for (const n of pre.childNodes) {
+    if (n.nodeType === 3) { for (const s of n.textContent.replace(NBSP, ' ').split('\n')) out.push({ t: 'linea', s }); continue; }
+    if (n.classList && n.classList.contains('nota')) { const prev = modeloPrevio[Number(n.dataset.k)]; out.push(prev && prev.t === 'nota' ? prev : { t: 'nota', texto: n.textContent }); continue; }
+    out.push({ t: 'linea', s: n.textContent.replace(NBSP, ' ').replace(/\n$/, '') });
+  }
+  // una nota borrada con el teclado no se pierde: vuelve donde estaba
+  modeloPrevio.forEach((it, k) => { if (it.t === 'nota' && !out.includes(it)) out.splice(Math.min(k, out.length), 0, it); });
+  return out.length ? out : [{ t: 'linea', s: '' }];
+}
+function posCaret(pre) {
+  const sel = window.getSelection(); if (!sel.rangeCount) return null; const r = sel.getRangeAt(0);
+  const ln = r.startContainer.nodeType === 1 && r.startContainer.classList && r.startContainer.classList.contains('ln') ? r.startContainer : (r.startContainer.parentElement && r.startContainer.parentElement.closest('.ln'));
+  if (!ln || !pre.contains(ln)) return null;
+  const antes = document.createRange(); antes.selectNodeContents(ln); antes.setEnd(r.startContainer, r.startOffset);
+  return { linea: [...pre.children].indexOf(ln), col: antes.toString().replace(NBSP, ' ').length };
+}
+function ponerCaret(pre, linea, col) {
+  const ln = pre.children[Math.max(0, Math.min(linea, pre.children.length - 1))]; if (!ln) return pre.focus();
+  const walker = document.createTreeWalker(ln, NodeFilter.SHOW_TEXT); let resto = col, nodo = null, off = 0;
+  while ((nodo = walker.nextNode())) { if (resto <= nodo.textContent.length) { off = resto; break; } resto -= nodo.textContent.length; }
+  const r = document.createRange();
+  if (nodo) r.setStart(nodo, off); else r.selectNodeContents(ln), r.collapse(false);
+  r.collapse(true); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); pre.focus();
+}
+function prepararPre(pre) {
+  const ed = edA.editando; ed.pasado = ed.pasado || []; ed.futuro = ed.futuro || [];
+  const foto = () => ({ modelo: ed.modelo.map(it => ({ ...it })), caret: posCaret(pre) });
+  const restaurar = f => { ed.modelo = f.modelo.map(it => ({ ...it })); pre.innerHTML = htmlModelo(ed.modelo); if (f.caret) ponerCaret(pre, f.caret.linea, f.caret.col); else pre.focus(); };
+  pre.addEventListener('beforeinput', () => { ed.pasado.push(foto()); if (ed.pasado.length > 200) ed.pasado.shift(); ed.futuro = []; });
+  pre.addEventListener('input', () => {
+    const caret = posCaret(pre); ed.modelo = leerModelo(pre, ed.modelo);
+    pre.innerHTML = htmlModelo(ed.modelo); if (caret) ponerCaret(pre, caret.linea, caret.col);
+  });
+  // deshacer / rehacer propios (el recoloreado en cada tecla anula el del navegador): ⌘Z / Ctrl+Z, ⇧⌘Z / Ctrl+Y
+  pre.addEventListener('keydown', ev => {
+    const cmd = ev.metaKey || ev.ctrlKey;
+    if (cmd && ev.key.toLowerCase() === 'z' && !ev.shiftKey) { ev.preventDefault(); const f = ed.pasado.pop(); if (f) { ed.futuro.push(foto()); restaurar(f); } return; }
+    if (cmd && ((ev.key.toLowerCase() === 'z' && ev.shiftKey) || ev.key.toLowerCase() === 'y')) { ev.preventDefault(); const f = ed.futuro.pop(); if (f) { ed.pasado.push(foto()); restaurar(f); } return; }
+    if (ev.key === 'Escape') { ev.preventDefault(); cancelarBloque(); }
+    if (ev.key === 'Tab') { ev.preventDefault(); document.execCommand('insertText', false, '    '); }
+  });
+  ed.foto = foto; // para que el arrastre de acordes también deje huella
+  // arrastrar un acorde de lado dentro de su fila
+  pre.addEventListener('pointerdown', e => {
+    const ac = e.target.closest('.tk'); if (!ac || (e.button && e.button !== 0)) return;
+    e.preventDefault(); const ln = ac.closest('.ln'); const k = Number(ln.dataset.k); const i = Number(ac.dataset.i);
+    if (edA.editando.foto) { edA.editando.pasado.push(edA.editando.foto()); edA.editando.futuro = []; }
+    const probe = document.createElement('span'); probe.textContent = '0000000000'; probe.style.visibility = 'hidden'; ln.append(probe); const charW = probe.getBoundingClientRect().width / 10; probe.remove();
+    const x0 = ln.getBoundingClientRect().left - ln.scrollLeft; let ultimoCol = null;
+    const mover = ev => {
+      if (ev.pointerId !== e.pointerId) return; ev.preventDefault();
+      const col = Math.max(0, Math.round((ev.clientX - x0 + pre.scrollLeft) / charW)); if (col === ultimoCol) return; ultimoCol = col;
+      const it = edA.editando.modelo[k]; if (!it || it.t !== 'linea') return;
+      it.s = moverToken(it.s, i, col); const lnEl = pre.children[k]; if (lnEl) lnEl.innerHTML = resaltarFila(it.s);
+    };
+    const soltar = ev => { if (ev && ev.pointerId !== e.pointerId) return; document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar); };
+    document.addEventListener('pointermove', mover, { passive: false }); document.addEventListener('pointerup', soltar); document.addEventListener('pointercancel', soltar);
+  });
+}
+function moverToken(fila, i, col) { // recoloca el token i de una fila de acordes en la columna col; los demás conservan su columna (y ceden si chocan)
+  const toks = []; const re = /\S+/g; let m; while ((m = re.exec(fila))) toks.push({ col: m.index, t: m[0] });
+  if (!toks[i]) return fila; toks[i].col = col;
+  const orden = toks.map((t, idx) => ({ ...t, idx })).sort((a, b) => a.col - b.col || a.idx - b.idx);
+  let out = ''; for (const t of orden) { const c = Math.max(t.col, out.length ? out.length + 1 : 0); out = out.padEnd(c) + t.t; }
+  return out;
+}
+function modeloDeSeccion(sec) {
+  const L = lineasCuerpo(); const modelo = [];
+  for (const l of sec.lineas) { const raw = L[l]; let m; if ((m = raw.match(RE_NOTA))) modelo.push({ t: 'nota', texto: m[2] }); else for (const s of lineaAHoja(raw)) modelo.push({ t: 'linea', s }); }
+  while (modelo.length && modelo[modelo.length - 1].t === 'linea' && !modelo[modelo.length - 1].s.trim()) modelo.pop();
+  if (!modelo.length) modelo.push({ t: 'linea', s: '' });
+  return modelo;
+}
+function editarBloque(j) {
+  const b = edA.bloques[j]; if (!b || !b.sec) return;
+  edA.editando = { j, modelo: modeloDeSeccion(b.sec), caret: null }; edA.menu = null; renderEditorAcordes();
+}
+function cancelarBloque() { edA.editando = null; renderEditorAcordes(); }
+function guardarBloque() {
+  const ed = edA.editando; if (!ed) return; const b = edA.bloques[ed.j]; if (!b || !b.sec) { edA.editando = null; return renderEditorAcordes(); }
+  const pre = $('#edA-cancion .bloque.editando .ed-pre'); if (pre) ed.modelo = leerModelo(pre, ed.modelo);
+  // aviso: filas que parecen de acordes pero tienen algo que no se reconoce (irían como letra)
+  for (const it of ed.modelo) if (it.t === 'linea') { const d = tokensDudosos(it.s); if (d.length && !confirm(`En la fila «${it.s.trim()}» no reconozco como acorde: ${d.join(', ')}. Se guardaría como letra. ¿Seguir igual?`)) return; }
+  const nuevas = []; let chunk = [];
+  const vaciar = () => { if (chunk.length) { nuevas.push(...hojaACuerpo(chunk)); chunk = []; } };
+  for (const it of ed.modelo) { if (it.t === 'nota') { vaciar(); nuevas.push(`{nota: ${it.texto}}`); } else chunk.push(it.s); }
+  vaciar();
+  while (nuevas.length && !nuevas[nuevas.length - 1].trim()) nuevas.pop(); nuevas.push('');
+  const L = lineasCuerpo(); const ls = b.sec.lineas;
+  if (ls.length) L.splice(ls[0], ls[ls.length - 1] - ls[0] + 1, ...nuevas); else L.splice(b.sec.ini + 1, 0, ...nuevas);
+  edA.editando = null; guardarAcordes(L.join('\n'));
+}
+// ---------- notas: clic derecho o pulsación larga sobre una línea (o sobre una nota para editarla) ----------
+function cajaNota({ tras, texto = '', rotulo = '', alGuardar, alBorrar }) {
+  $$('.nota-caja').forEach(x => x.remove());
+  const caja = document.createElement('div'); caja.className = 'nota-caja'; caja.setAttribute('contenteditable', 'false');
+  caja.addEventListener('keydown', ev => ev.stopPropagation()); caja.addEventListener('beforeinput', ev => ev.stopPropagation()); caja.addEventListener('input', ev => ev.stopPropagation());
+  caja.innerHTML = `${rotulo ? `<div class="ayuda">${esc(rotulo)}</div>` : ''}<textarea rows="2" placeholder="Nota para la banda en este punto…"></textarea><div class="fila"><button class="primario nc-guardar">Guardar</button>${alBorrar ? '<button class="peligro nc-borrar">Borrar</button>' : ''}<button class="nc-cancelar">Cancelar</button></div>`;
+  caja.querySelector('textarea').value = texto;
+  caja.querySelector('.nc-guardar').onclick = () => { const t = caja.querySelector('textarea').value.trim(); caja.remove(); if (t) alGuardar(t); };
+  caja.querySelector('.nc-cancelar').onclick = () => caja.remove();
+  if (alBorrar) caja.querySelector('.nc-borrar').onclick = () => { caja.remove(); alBorrar(); };
+  tras.insertAdjacentElement('afterend', caja); caja.querySelector('textarea').focus();
+}
+function abrirNotaEn(el) {
+  const ed = edA.editando;
+  if (ed) { // en modo edición: sobre el modelo
+    const ln = el.closest('.ln'); if (!ln) return; const k = Number(ln.dataset.k); const it = ed.modelo[k]; if (!it) return;
+    const pre = ln.closest('.ed-pre'); ed.modelo = leerModelo(pre, ed.modelo);
+    // la caja va FUERA del área editable (debajo del texto), si no lo tecleado entra al bloque (Cristhian, 11-sep)
+    const fuera = pre; const rotulo = it.t === 'nota' ? it.texto : `nota tras la fila ${k + 1}: «${(it.s || '').trim().slice(0, 40)}»`;
+    if (it.t === 'nota') cajaNota({ tras: fuera, texto: it.texto, rotulo, alGuardar: t => { it.texto = t; renderEditorAcordes(); }, alBorrar: () => { ed.modelo.splice(ed.modelo.indexOf(it), 1); renderEditorAcordes(); } });
+    else cajaNota({ tras: fuera, rotulo, alGuardar: t => { ed.modelo.splice(k + 1, 0, { t: 'nota', texto: t }); renderEditorAcordes(); } });
+    return;
+  }
+  const nota = el.closest('.nota[data-l]'); const linea = el.closest('.linea[data-l]');
+  if (nota) { const l = Number(nota.dataset.l); const L = lineasCuerpo(); const texto = (L[l].match(RE_NOTA) || [])[2] || '';
+    cajaNota({ tras: nota, texto, alGuardar: t => { const L2 = lineasCuerpo(); L2[l] = `{nota: ${t}}`; guardarAcordes(L2.join('\n')); }, alBorrar: () => { const L2 = lineasCuerpo(); L2.splice(l, 1); guardarAcordes(L2.join('\n')); } }); return; }
+  if (linea) { const l = Number(linea.dataset.l); cajaNota({ tras: linea, alGuardar: t => { const L2 = lineasCuerpo(); L2.splice(l + 1, 0, `{nota: ${t}}`); guardarAcordes(L2.join('\n')); } }); }
+}
+let tNotaLarga = null, notaLargaAbierta = false;
+$('#edA-cancion').addEventListener('contextmenu', e => { const el = e.target.closest('.linea[data-l], .nota[data-l], .ln'); if (!el) return; e.preventDefault(); abrirNotaEn(el); });
+$('#edA-cancion').addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') return; const el = e.target.closest('.linea[data-l], .nota[data-l], .ln'); if (!el || e.target.closest('.tk')) return;
+  notaLargaAbierta = false; clearTimeout(tNotaLarga); const x = e.clientX, y = e.clientY;
+  const cancelar = ev => { if (Math.abs(ev.clientX - x) > 10 || Math.abs(ev.clientY - y) > 10) clearTimeout(tNotaLarga); };
+  tNotaLarga = setTimeout(() => { notaLargaAbierta = true; abrirNotaEn(el); }, 550);
+  const fin = () => { clearTimeout(tNotaLarga); document.removeEventListener('pointermove', cancelar); document.removeEventListener('pointerup', fin); document.removeEventListener('pointercancel', fin); };
+  document.addEventListener('pointermove', cancelar); document.addEventListener('pointerup', fin); document.addEventListener('pointercancel', fin);
+});
+// tocar fuera del bloque en edición lo guarda
+document.addEventListener('pointerdown', e => { if (!edA.editando) return; if (e.target.closest('.bloque.editando') || e.target.closest('.nota-caja')) return; guardarBloque(); });
 async function guardarAcordes(nuevoCho) {
   edA.historial.push(editor.cho); if (edA.historial.length > 50) edA.historial.shift();
   editor.guardando = true; try { await guardarEditor(nuevoCho); } finally { editor.guardando = false; }
@@ -961,14 +1112,15 @@ function mostrarAgregarLinea(l, enLaMisma) {
   $('#edA-agregar-txt').focus();
 }
 $('#edA-cancion').addEventListener('click', e => {
+  if (notaLargaAbierta) { notaLargaAbierta = false; return; }
+  if (e.target.closest('.ed-listo')) { guardarBloque(); return; }
+  if (e.target.closest('.ed-cancelar')) { cancelarBloque(); return; }
+  if (e.target.closest('.edicion') || e.target.closest('.nota-caja') || e.target.closest('.menu-bloque')) return;
   const mb = e.target.closest('.mas-bloque'); if (mb) { const j = Number(mb.dataset.j); edA.menu = edA.menu === j ? null : j; renderEditorAcordes(); return; }
   const cl = e.target.closest('.cortar-linea'); if (cl) { cortarEn(Number(cl.dataset.l)); return; }
   const us = e.target.closest('.usar-seccion'); if (us) { const a = ordenActual(); a.push(us.dataset.nombre); guardarAcordes(conArreglo(editor.cho, a)); return; }
-  const mas = e.target.closest('.mas-linea');
-  if (mas) { const l = Number(mas.dataset.l); mostrarAgregarLinea(l, mas.closest('.linea').classList.contains('solo-acordes')); return; }
-  const ac = e.target.closest('.ac'); const pal = e.target.closest('.pal');
-  if (ac && ac.textContent) { edA.sel = { l: Number(ac.dataset.l), ini: Number(ac.dataset.ini), fin: Number(ac.dataset.fin), texto: ac.textContent }; edA.destino = null; edA.duplicar = false; renderEditorAcordes(); return; }
-  if (pal) { edA.destino = { l: Number(pal.dataset.l), ini: Number(pal.dataset.ini), fin: Number(pal.dataset.fin) }; posElegida = null; renderEditorAcordes(); mostrarLetras(edA.destino, !edA.sel); }
+  if (e.target.closest('.agarre-bloque') || e.target.closest('.nota[data-l]')) return;
+  const bl = e.target.closest('.bloque'); if (bl && !edA.editando) editarBloque(Number(bl.dataset.j)); // tocar el bloque = editarlo como texto
 });
 $('#edA-cambiar').onclick = () => {
   const n = $('#edA-cambiar-txt').value.trim().replace(/^\[|\]$/g, ''); if (!n || !edA.sel) return aviso('escribe el nuevo nombre');
@@ -980,6 +1132,7 @@ $('#edA-quitar').onclick = () => { if (!edA.sel) return; const L = lineasCuerpo(
 document.addEventListener('keydown', ev => {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if (!$('#vista-editor').classList.contains('activa') || !$('#sub-acordes').classList.contains('activa')) return;
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'z' && !ev.shiftKey && !edA.editando) { ev.preventDefault(); $('#edA-deshacer').click(); return; } // ⌘Z fuera del bloque = ↶ Deshacer
   if (edA.sel && !edA.destino && (ev.key === 'Backspace' || ev.key === 'Delete')) { ev.preventDefault(); $('#edA-quitar').click(); }
   else if (ev.key === 'Escape' && (edA.sel || edA.destino || edA.lineaNueva)) { ev.preventDefault(); $(edA.destino || edA.lineaNueva ? '#edA-letras-cancelar' : '#edA-cancelar').click(); }
 });

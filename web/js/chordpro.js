@@ -233,6 +233,44 @@ export function textoAChordPro(texto, { titulo = '', artista = '', cejilla = '',
   return cab.concat(cuerpo).join('\n') + '\n';
 }
 
+// --- hoja ⇄ cuerpo: para editar un bloque como texto (acordes sobre la letra, alineados por columnas; Cristhian, 11-sep) ---
+// Una línea del archivo ("nues[Dm]tro amor") → filas de hoja: "     Dm" sobre "nuestro amor". Y al revés con la regla del importador.
+export function lineaAHoja(raw) {
+  const acordes = []; let letra = ''; const re = /\[([^\]]*)\]/g; let ultimo = 0, m;
+  while ((m = re.exec(raw))) { letra += raw.slice(ultimo, m.index); acordes.push({ col: letra.length, texto: m[1] }); ultimo = re.lastIndex; }
+  letra += raw.slice(ultimo);
+  if (!acordes.length) return [letra];
+  const fin = letra.trimEnd().length; letra = letra.trimEnd();
+  let fila = '';
+  for (const a of acordes) { let col = Math.min(a.col, fin); if (fila.length && col < fila.length + 1) col = fila.length + 1; fila = fila.padEnd(col) + a.texto; }
+  // si lo que queda de texto son solo marcas (x2, bis, |…), van en la misma fila de acordes
+  const resto = letra.trim();
+  if (resto && resto.split(/\s+/).every(t => TOKENS_OK.has(t))) return [fila + ' ' + resto];
+  return resto ? [fila, letra] : [fila];
+}
+export function esFilaAcordes(l) { return esLineaAcordes(l); }
+export function hojaACuerpo(filas) { // filas de texto (sin marcas) → líneas del archivo
+  const out = [];
+  for (let i = 0; i < filas.length; i++) {
+    const l = filas[i];
+    if (!l.trim()) { out.push(''); continue; }
+    if (esLineaAcordes(l)) {
+      const sig = filas[i + 1] || '';
+      if (sig.trim() && !esLineaAcordes(sig)) { out.push(insertar(l, sig)); i++; continue; }
+      out.push(l.trim().split(/\s+/).map(t => CHORD_TOKEN.test(limpiarTok(t)) ? `[${limpiarTok(t)}]` : t).join(' ')); continue;
+    }
+    out.push(l);
+  }
+  return out;
+}
+// tokens de una fila que parecen acorde pero no lo son (para avisar antes de guardar): p. ej. "Sim", "Am77"
+export function tokensDudosos(fila) {
+  if (esLineaAcordes(fila)) return [];
+  const toks = fila.trim().split(/\s+/); const ok = toks.filter(t => CHORD_TOKEN.test(limpiarTok(t)));
+  if (toks.length >= 2 && ok.length >= Math.ceil(toks.length / 2)) return toks.filter(t => !CHORD_TOKEN.test(limpiarTok(t)) && !TOKENS_OK.has(t));
+  return [];
+}
+
 // --- eliminar una sección completa (marca + letra + acordes) desde el editor de Secciones ---
 // indiceLinea: línea del archivo con la marca {seccion: X}. Borra hasta la siguiente marca de sección o parte.
 // Si ese nombre ya no existe en ninguna otra sección, también sale del {arreglo}.
