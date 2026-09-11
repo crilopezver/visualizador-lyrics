@@ -102,6 +102,12 @@
     <div class="fila"><label class="ctl" style="flex:1;gap:.5rem">Género <select id="ed-genero" style="flex:1"></select></label><input id="ed-genero-nuevo" placeholder="Nuevo género" hidden><button id="ed-genero-ok" hidden>OK</button></div>
 
     <nav class="subtabs"><button data-sub="secciones" class="activa">Secciones</button><button data-sub="acordes">Acordes</button><button data-sub="arreglo">Arreglo original</button></nav>
+    <!-- MIX: lista de canciones; cada una con sus partes (Cristhian, 11-sep) -->
+    <div id="ed-mix" hidden>
+      <p class="ayuda">Canciones del mix, en orden. Toca <b>Partes</b> para elegir y ordenar qué secciones de esa canción entran. Cada cambio se guarda al instante.</p>
+      <ol id="ed-mix-lista" class="lista"></ol>
+      <div class="fila"><select id="ed-mix-cancion"><option value="">＋ Agregar canción al mix…</option></select></div>
+    </div>
 
     <div id="sub-secciones" class="sub activa">
       <p class="ayuda">Solo letra. Toca la <b>primera palabra</b> del tramo y luego la <b>última</b>; después elige el nombre de la sección.</p>

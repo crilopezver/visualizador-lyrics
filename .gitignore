@@ -16,3 +16,5 @@ __pycache__/
 .env
 # Lanzador generado por lanzador/crear_app.sh (rutas de esta Mac)
 *.app/
+# Binario compilado del OCR (se genera con: swiftc -O -o herramientas/ocr_foto herramientas/ocr_foto.swift)
+herramientas/ocr_foto

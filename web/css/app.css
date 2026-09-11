@@ -16,6 +16,11 @@ h3 small{font-weight:400;font-size:.8rem;color:var(--tenue);margin-left:.4rem}
 #integrantes button.integrante{display:flex;flex-direction:column;align-items:flex-start;gap:.15rem;padding:.7rem .9rem;min-width:9rem;text-align:left}
 #integrantes button.integrante small{color:var(--tenue);font-size:.75rem;font-weight:400}
 #integrantes button.integrante.yo{border-color:var(--acorde)}
+#ed-mix-lista > li{flex-wrap:wrap}
+#ed-mix-lista ol.partes{list-style:none;flex-basis:100%;margin:.4rem 0 .2rem 1.2rem;padding:0;border-left:2px solid var(--borde)}
+#ed-mix-lista ol.partes li{padding:.35rem .5rem;border-bottom:1px dashed var(--borde)}
+#ed-mix-lista ol.partes .chips{flex-basis:100%;margin:.4rem .5rem}
+#ed-mix-lista .n{color:var(--tenue);font-size:.85rem;margin-left:.4rem}
 #ed-arreglo-lista .agarre{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;color:var(--tenue);font-size:1.3rem;padding:.2rem .6rem .2rem .2rem}
 #ed-arreglo-lista li.arrastrando{opacity:.55;background:#1c1c1c}
 #vista-biblioteca .orden{display:block;color:var(--tenue);font-size:.85rem;margin:.4rem 0 .2rem}
@@ -58,6 +63,7 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 #cancion{font-size:calc(var(--tam) * var(--ajuste, 1));line-height:1.25} /* --ajuste: reducción automática para que quepa la sección */
 #cancion .seccion{margin:1.1em 0 .4em;padding-top:.3em;border-top:1px solid var(--borde)}
 #cancion .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin-bottom:.35em}
+.nombre .tono{text-transform:none;letter-spacing:0} /* el acorde del tono respeta su minúscula: Am, no AM (Cristhian, 11-sep) */
 #cancion .linea{margin:.15em 0;white-space:normal}
 #cancion .pal{display:inline-block;white-space:nowrap;vertical-align:bottom}
 #cancion .esp{display:inline-block;white-space:pre;vertical-align:bottom}
@@ -220,3 +226,4 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #cancion .seccion.marcada-sec{background:#3a2806;border-radius:10px;box-shadow:0 0 0 8px #3a2806}
 #cancion.vista-estructura .estructura li.marcada-sec{background:var(--acorde);color:#000}
 #cancion.vista-estructura .estructura li.marcada-sec .acs,#cancion.vista-estructura .estructura li.marcada-sec .nota{color:#000}
+#ed-mix-lista select.tono-mix{font-size:.85rem;padding:.35rem .4rem;max-width:11rem}

@@ -611,7 +611,7 @@ async function cargarInfo() {
 }
 
 // ---------- edición de canción (director, desde "Canciones") ----------
-const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null };
+const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null, mixAbiertos: new Set() };
 const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
 const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género)\s*:/i;
 const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
@@ -654,6 +654,10 @@ async function renderEditor() {
   const c = parsear(editor.cho);
   $('#ed-titulo').textContent = c.meta.titulo || editor.id;
   await llenarGeneros($('#ed-genero'), c.meta.genero || c.meta.género || ''); $('#ed-genero-nuevo').hidden = true; $('#ed-genero-ok').hidden = true;
+  // un mix no se edita por secciones: se edita como lista de canciones con sus partes (Cristhian, 11-sep, fila 158)
+  const esMix = (c.meta.tipo || '') === 'mix';
+  $('.subtabs').hidden = esMix; $$('.sub').forEach(x => { x.hidden = esMix; }); $('#ed-mix').hidden = !esMix;
+  if (esMix) return renderMix(c);
   await cargarNombres();
   // --- secciones: solo letra, por palabra ---
   const cont = $('#ed-texto'); cont.innerHTML = '';
@@ -1027,6 +1031,65 @@ function trozos(cho) { // cabecera + trozos que empiezan en {seccion} o {parte}
     else if (actual) actual.push(l); else cab.push(l);
   }
   return { cab, ts };
+}
+// ---------- editor de mix: canciones → partes ----------
+async function seccionesDe(pid) { // secciones de una canción en el orden de su arreglo (o natural), sin repetir para las fichas
+  try { const c = parsear(await obtenerCho(pid)); const arr = nombresArreglo(c); const nat = c.secciones.map(s => s.nombre || '').filter(Boolean); return { arreglo: arr.length ? arr : nat, disponibles: [...new Set(nat)] }; } catch { return { arreglo: [], disponibles: [] }; }
+}
+async function renderMix() {
+  const { cab, ts } = trozos(editor.cho);
+  const items = [];
+  for (const t of ts) {
+    const m = t[0].match(RE_PARTE);
+    if (m) { const [pid, sec, t] = m[1].split('|').map(x => x.trim()); const transp = parseInt(t, 10) || 0; const u = items[items.length - 1]; if (u && u.tipo === 'cancion' && u.id === pid) u.partes.push(sec); else items.push({ tipo: 'cancion', id: pid, partes: [sec], transp }); }
+    else items.push({ tipo: 'bloque', nombre: (t[0].match(RE_SEC) || [])[1] || 'bloque', lineas: t });
+  }
+  const guardar = async () => {
+    const out = [...cab]; while (out.length && !out[out.length - 1].trim()) out.pop(); out.push('');
+    for (const it of items) { if (it.tipo === 'cancion') for (const s of it.partes) out.push(`{parte: ${it.id} | ${s}${it.transp ? ` | ${it.transp > 0 ? '+' : ''}${it.transp}` : ''}}`); else out.push(...it.lineas.filter((l, k) => k === 0 || l.trim())); out.push(''); }
+    await guardarEditor(out.join('\n').replace(/\n{3,}/g, '\n\n')); renderEditor();
+  };
+  const ol = $('#ed-mix-lista'); ol.innerHTML = '';
+  if (!items.length) ol.innerHTML = '<li class="vacio">El mix está vacío: agrega canciones abajo.</li>';
+  for (const [i, it] of items.entries()) {
+    const li = document.createElement('li');
+    const rotulo = it.tipo === 'cancion' ? `🎵 ${esc(titulo(it.id))}<span class="n">${it.partes.length} parte${it.partes.length === 1 ? '' : 's'}</span>` : `🗒 ${esc(it.nombre)}<span class="n">bloque</span>`;
+    li.innerHTML = `<div class="info"><div class="t">${i + 1}. ${rotulo}</div></div><div class="acc"></div>`;
+    const acc = li.querySelector('.acc');
+    if (it.tipo === 'cancion') {
+      // tono en que se toca esta canción dentro del mix (la original no cambia): 12 tonos a partir del suyo, o semitonos si no tiene tono
+      const orig = (indice.find(x => x.id === it.id) || {}).tono || '';
+      const sel = document.createElement('select'); sel.className = 'tono-mix'; sel.title = 'Tono en que se toca en el mix';
+      for (let k = -6; k <= 5; k++) { const o = document.createElement('option'); o.value = k; o.textContent = orig ? (k ? `${tonoTranspuesto(orig, k)} (${k > 0 ? '+' : ''}${k})` : `${orig} · original`) : (k ? `${k > 0 ? '+' : ''}${k} st` : 'tono original'); if (k === (it.transp || 0)) o.selected = true; sel.append(o); }
+      sel.onchange = ev => { it.transp = Number(ev.target.value) || 0; guardar(); };
+      acc.append(sel);
+      acc.append(boton(editor.mixAbiertos.has(i) ? 'Partes ▴' : 'Partes ▾', () => { editor.mixAbiertos.has(i) ? editor.mixAbiertos.delete(i) : editor.mixAbiertos.add(i); renderMix(); }));
+    }
+    if (i > 0) acc.append(boton('↑', () => { [items[i - 1], items[i]] = [items[i], items[i - 1]]; guardar(); }));
+    if (i < items.length - 1) acc.append(boton('↓', () => { [items[i + 1], items[i]] = [items[i], items[i + 1]]; guardar(); }));
+    acc.append(boton('✕', () => { if (!confirm(it.tipo === 'cancion' ? `¿Quitar ${titulo(it.id)} del mix?` : '¿Quitar este bloque?')) return; items.splice(i, 1); guardar(); }));
+    if (it.tipo === 'cancion' && editor.mixAbiertos.has(i)) {
+      const { arreglo, disponibles } = await seccionesDe(it.id);
+      const sub = document.createElement('ol'); sub.className = 'partes';
+      it.partes.forEach((s, k) => {
+        const pl = document.createElement('li'); pl.innerHTML = `<div class="info"><div class="t">${esc(s)}</div></div><div class="acc"></div>`;
+        const pa = pl.querySelector('.acc');
+        if (k > 0) pa.append(boton('↑', () => { [it.partes[k - 1], it.partes[k]] = [it.partes[k], it.partes[k - 1]]; guardar(); }));
+        if (k < it.partes.length - 1) pa.append(boton('↓', () => { [it.partes[k + 1], it.partes[k]] = [it.partes[k], it.partes[k + 1]]; guardar(); }));
+        pa.append(boton('✕', () => { it.partes.splice(k, 1); if (!it.partes.length) items.splice(i, 1); guardar(); }));
+        sub.append(pl);
+      });
+      const chips = document.createElement('div'); chips.className = 'chips';
+      for (const n of disponibles) chips.append(boton('+ ' + n, () => { it.partes.push(n); guardar(); }));
+      if (arreglo.length) chips.append(boton('↺ Arreglo completo', () => { it.partes = [...arreglo]; guardar(); }, 'primario'));
+      if (!disponibles.length) chips.innerHTML = '<span class="ayuda">Esa canción no tiene secciones definidas.</span>';
+      sub.append(chips); li.append(sub);
+    }
+    ol.append(li);
+  }
+  const sel = $('#ed-mix-cancion'); sel.innerHTML = '<option value="">＋ Agregar canción al mix…</option>';
+  for (const c of indice.filter(x => !x.tipo && x.id !== editor.id)) { const o = document.createElement('option'); o.value = c.id; o.textContent = c.titulo + (c.artista ? ' · ' + c.artista : ''); sel.append(o); }
+  sel.onchange = async ev => { const pid = ev.target.value; if (!pid) return; const { arreglo } = await seccionesDe(pid); if (!arreglo.length) { aviso('esa canción no tiene secciones'); ev.target.value = ''; return; } items.push({ tipo: 'cancion', id: pid, partes: [...arreglo], transp: 0 }); editor.mixAbiertos.add(items.length - 1); guardar(); };
 }
 function renderPartes(c) {
   const ol = $('#ed-partes-lista'); if (!ol) return; ol.innerHTML = '';

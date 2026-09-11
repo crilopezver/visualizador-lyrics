@@ -13,7 +13,7 @@ export function parsear(cho) {
     if (m) {
       const k = m[1].toLowerCase(), v = m[2];
       if (k === 'seccion' || k === 'sección') nueva(v);
-      else if (k === 'parte') { const [id, sec] = v.split('|').map(x => x.trim()); nueva(sec || ''); actual.parte = { id, seccion: sec || '' }; }
+      else if (k === 'parte') { const [id, sec, t] = v.split('|').map(x => x.trim()); nueva(sec || ''); actual.parte = { id, seccion: sec || '', transp: Math.max(-11, Math.min(11, parseInt(t, 10) || 0)) }; } // {parte: id | sección | +2}: en el mix esa canción se toca 2 semitonos arriba (Cristhian, 11-sep)
       else if (k === 'nota' || k === 'comentario' || k === 'c') { if (!actual) nueva(''); actual.lineas.push({ tipo: 'nota', texto: v }); }
       else meta[k] = v;
       continue;
@@ -46,7 +46,14 @@ export function expandir(cancion, resolverParte = () => null) {
   const base = cancion.secciones.map(s => {
     if (!s.parte) return { ...s };
     const r = resolverParte(s.parte.id, s.parte.seccion);
-    if (r) return { nombre: r.nombre || s.parte.seccion, lineas: r.lineas, origen: { id: s.parte.id, titulo: r.titulo, tono: r.tono } };
+    if (r) {
+      const t = s.parte.transp || 0; let lineas = r.lineas, tono = r.tono || '';
+      if (t) { // la parte se toca en otro tono dentro del mix: acordes transpuestos al expandir, la canción original no cambia
+        tono = r.tono ? tonoTranspuesto(r.tono, t) : ''; const bem = TONOS_BEMOL.has(tono);
+        lineas = r.lineas.map(l => l.segs ? { ...l, segs: l.segs.map(g => ({ ...g, acorde: g.acorde ? transponerAcorde(g.acorde, t, bem) : '' })) } : l);
+      }
+      return { nombre: r.nombre || s.parte.seccion, lineas, origen: { id: s.parte.id, titulo: r.titulo, tono, tonoOriginal: r.tono || '', transp: t } };
+    }
     return { nombre: s.parte.seccion, lineas: [{ tipo: 'nota', texto: `No encontré la sección "${s.parte.seccion}" en la canción "${s.parte.id}"` }], origen: { id: s.parte.id, titulo: s.parte.id, tono: '' } };
   });
   const arreglo = nombresArreglo(cancion);
@@ -64,7 +71,7 @@ const ORDINAL = n => n === 1 ? '' : `${n}ª vez`;
 export function tituloSeccion(s, i) {
   const partes = [s.nombre || `Sección ${i + 1}`];
   if (s.vez > 1) partes.push(ORDINAL(s.vez));
-  if (s.origen) partes.push(s.origen.titulo + (s.origen.tono ? ` · tono ${s.origen.tono}` : ''));
+  if (s.origen) partes.push(s.origen.titulo + (s.origen.tono ? ` · tono ${s.origen.tono}` + (s.origen.transp && s.origen.tonoOriginal ? ` (orig. ${s.origen.tonoOriginal})` : '') : (s.origen.transp ? ` · ${s.origen.transp > 0 ? '+' : ''}${s.origen.transp} st` : '')));
   return partes.join(' · ');
 }
 
@@ -139,7 +146,7 @@ export function renderCancion(cancion, opts = {}) {
       const html = renderLinea(l.segs, desplazamiento, bemoles, k);
       return `<div class="linea ${l.tipo === 'acordes' ? 'solo-acordes' : ''}" data-l="${k}">${html}${l.rep ? `<span class="rep">(${esc(l.rep)})</span>` : ''}</div>`;
     }).join('');
-    const nombre = (s.nombre || s.vez > 1 || s.origen) ? `<div class="nombre">${esc(tituloSeccion(s, i))}</div>` : '';
+    const nombre = (s.nombre || s.vez > 1 || s.origen) ? `<div class="nombre">${esc(tituloSeccion(s, i)).replace(/ · tono (.+)$/, (_, t) => ` · tono <span class="tono">${t}</span>`)}</div>` : ''; // el tono conserva su minúscula (Am, no AM)
     return `<div class="seccion ${i === seccionActual ? 'actual' : ''}" data-sec="${i}">${nombre}${lineas}</div>`;
   }).join('');
 }
