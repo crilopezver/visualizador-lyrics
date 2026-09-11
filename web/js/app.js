@@ -611,7 +611,7 @@ async function cargarInfo() {
 }
 
 // ---------- edición de canción (director, desde "Canciones") ----------
-const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null, mixAbiertos: new Set() };
+const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null, mixAbiertos: new Set(), esMix: false, mixVacio: false };
 const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
 const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género)\s*:/i;
 const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
@@ -655,7 +655,7 @@ async function renderEditor() {
   $('#ed-titulo').textContent = c.meta.titulo || editor.id;
   await llenarGeneros($('#ed-genero'), c.meta.genero || c.meta.género || ''); $('#ed-genero-nuevo').hidden = true; $('#ed-genero-ok').hidden = true;
   // un mix no se edita por secciones: se edita como lista de canciones con sus partes (Cristhian, 11-sep, fila 158)
-  const esMix = (c.meta.tipo || '') === 'mix';
+  const esMix = (c.meta.tipo || '') === 'mix'; editor.esMix = esMix;
   $('.subtabs').hidden = esMix; $$('.sub').forEach(x => { x.hidden = esMix; }); $('#ed-mix').hidden = !esMix;
   if (esMix) return renderMix(c);
   await cargarNombres();
@@ -1049,7 +1049,7 @@ async function renderMix() {
     for (const it of items) { if (it.tipo === 'cancion') for (const s of it.partes) out.push(`{parte: ${it.id} | ${s}${it.transp ? ` | ${it.transp > 0 ? '+' : ''}${it.transp}` : ''}}`); else out.push(...it.lineas.filter((l, k) => k === 0 || l.trim())); out.push(''); }
     await guardarEditor(out.join('\n').replace(/\n{3,}/g, '\n\n')); renderEditor();
   };
-  const ol = $('#ed-mix-lista'); ol.innerHTML = '';
+  const ol = $('#ed-mix-lista'); ol.innerHTML = ''; editor.mixVacio = !items.length;
   if (!items.length) ol.innerHTML = '<li class="vacio">El mix está vacío: agrega canciones abajo.</li>';
   for (const [i, it] of items.entries()) {
     const li = document.createElement('li');
@@ -1087,9 +1087,18 @@ async function renderMix() {
     }
     ol.append(li);
   }
-  const sel = $('#ed-mix-cancion'); sel.innerHTML = '<option value="">＋ Agregar canción al mix…</option>';
-  for (const c of indice.filter(x => !x.tipo && x.id !== editor.id)) { const o = document.createElement('option'); o.value = c.id; o.textContent = c.titulo + (c.artista ? ' · ' + c.artista : ''); sel.append(o); }
-  sel.onchange = async ev => { const pid = ev.target.value; if (!pid) return; const { arreglo } = await seccionesDe(pid); if (!arreglo.length) { aviso('esa canción no tiene secciones'); ev.target.value = ''; return; } items.push({ tipo: 'cancion', id: pid, partes: [...arreglo], transp: 0 }); editor.mixAbiertos.add(items.length - 1); guardar(); };
+  // agregar canción: buscador como el de Canciones (Cristhian, 11-sep: el desplegable no sirve con muchas canciones)
+  const buscar = $('#ed-mix-buscar'), res = $('#ed-mix-resultados');
+  const agregar = async pid => { const { arreglo } = await seccionesDe(pid); if (!arreglo.length) return aviso('esa canción no tiene secciones'); items.push({ tipo: 'cancion', id: pid, partes: [...arreglo], transp: 0 }); editor.mixAbiertos.add(items.length - 1); buscar.value = ''; guardar(); };
+  const pintarRes = () => {
+    const q = norm(buscar.value.trim()); res.innerHTML = '';
+    if (!q) return;
+    const enMix = new Set(items.filter(x => x.tipo === 'cancion').map(x => x.id));
+    const lista = indice.filter(c => !c.tipo && c.id !== editor.id && (norm(c.titulo).includes(q) || norm(c.artista).includes(q))).slice(0, 12);
+    if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
+    for (const c of lista) { const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(c.titulo)}${enMix.has(c.id) ? '<span class="n">ya está en el mix</span>' : ''}</div><div class="s">${esc(c.artista || '')}</div></div><div class="acc"></div>`; li.querySelector('.acc').append(boton('+ Agregar', () => agregar(c.id), 'primario')); res.append(li); }
+  };
+  buscar.oninput = pintarRes; pintarRes();
 }
 function renderPartes(c) {
   const ol = $('#ed-partes-lista'); if (!ol) return; ol.innerHTML = '';
@@ -1104,7 +1113,18 @@ function renderPartes(c) {
     ol.append(li);
   });
 }
-$('#ed-volver').onclick = () => { irA('biblioteca'); };
+// descartar un mix (a la papelera del servidor, como cualquier canción) y salir; si está vacío al volver, se ofrece borrarlo (Cristhian, 11-sep, fila 162)
+async function descartarMix(preguntar = true) {
+  if (preguntar && !confirm(`¿Descartar el mix “${$('#ed-titulo').textContent}”? Queda una copia en datos/papelera.`)) return false;
+  try { await api(`/api/canciones/${editor.id}`, { method: 'DELETE' }); cacheCho.delete(editor.id); await cargarIndice(); renderBiblioteca(); aviso('mix descartado'); irA('biblioteca'); return true; }
+  catch (e) { aviso('no se pudo descartar: ' + e.message); return false; }
+}
+$('#ed-mix-descartar').onclick = () => descartarMix(true);
+$('#ed-mix-listo').onclick = () => { aviso('mix guardado'); irA('biblioteca'); };
+$('#ed-volver').onclick = async () => {
+  if (editor.esMix && editor.mixVacio && confirm('El mix está vacío. ¿Lo borro?')) { await descartarMix(false); return; }
+  irA('biblioteca');
+};
 async function nuevaCancionEspecial(tipo) {
   const t = prompt(tipo === 'mix' ? 'Título del mix:' : 'Título del bloque del show:'); if (!t || !t.trim()) return;
   try {

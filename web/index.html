@@ -76,7 +76,7 @@
   <section id="vista-biblioteca" class="vista">
     <input id="buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
     <label class="orden">Ordenar por <select id="bib-orden"><option value="importada">importación (última primero)</option><option value="titulo">título</option><option value="artista">artista</option></select></label>
-    <div id="bib-director" class="fila" hidden><button id="btn-importar" class="primario">+ Importar canción (pegar)</button><span style="display:none"><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></span></div>
+    <div id="bib-director" class="fila" hidden><button id="btn-importar" class="primario">+ Importar canción (pegar)</button><button id="btn-nuevo-mix">+ Nuevo mix</button><button id="btn-nuevo-bloque">+ Nuevo bloque del show</button></div>
     <div id="bib-info" class="vacio"></div>
     <ul id="lista-canciones" class="lista"></ul>
   </section>
@@ -106,7 +106,10 @@
     <div id="ed-mix" hidden>
       <p class="ayuda">Canciones del mix, en orden. Toca <b>Partes</b> para elegir y ordenar qué secciones de esa canción entran. Cada cambio se guarda al instante.</p>
       <ol id="ed-mix-lista" class="lista"></ol>
-      <div class="fila"><select id="ed-mix-cancion"><option value="">＋ Agregar canción al mix…</option></select></div>
+      <h3>Agregar canción al mix</h3>
+      <input id="ed-mix-buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
+      <ul id="ed-mix-resultados" class="lista"></ul>
+      <div class="fila" id="ed-mix-acciones"><span class="ayuda" style="flex:1;align-self:center">Todo cambio en el mix se guarda solo. Si no lo quieres, descártalo.</span><button id="ed-mix-listo" class="primario">✓ Listo</button><button id="ed-mix-descartar" class="peligro">🗑 Descartar este mix</button></div>
     </div>
 
     <div id="sub-secciones" class="sub activa">
