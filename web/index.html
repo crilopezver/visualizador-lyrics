@@ -101,7 +101,7 @@
     <div class="fila"><button id="ed-volver">◀ Volver a Canciones</button></div>
     <div class="fila"><label class="ctl" style="flex:1;gap:.5rem">Género <select id="ed-genero" style="flex:1"></select></label><input id="ed-genero-nuevo" placeholder="Nuevo género" hidden><button id="ed-genero-ok" hidden>OK</button></div>
 
-    <nav class="subtabs"><button data-sub="secciones" class="activa">Secciones</button><button data-sub="acordes">Acordes</button><button data-sub="arreglo">Arreglo original</button></nav>
+    <nav class="subtabs"><button data-sub="acordes" class="activa">Estructura</button><button data-sub="secciones">Secciones</button></nav>
     <!-- MIX: lista de canciones; cada una con sus partes (Cristhian, 11-sep) -->
     <div id="ed-mix" hidden>
       <p class="ayuda">Canciones del mix, en orden. Toca <b>Partes</b> para elegir y ordenar qué secciones de esa canción entran. Cada cambio se guarda al instante.</p>
@@ -112,7 +112,7 @@
       <div class="fila" id="ed-mix-acciones"><span class="ayuda" style="flex:1;align-self:center">Todo cambio en el mix se guarda solo. Si no lo quieres, descártalo.</span><button id="ed-mix-listo" class="primario">✓ Listo</button><button id="ed-mix-descartar" class="peligro">🗑 Descartar este mix</button></div>
     </div>
 
-    <div id="sub-secciones" class="sub activa">
+    <div id="sub-secciones" class="sub">
       <p class="ayuda">Solo letra. Toca la <b>primera palabra</b> del tramo y luego la <b>última</b>; después elige el nombre de la sección.</p>
       <div id="ed-sel-barra" class="barra-sel" hidden>
         <div class="fila">
@@ -143,9 +143,9 @@
       </div>
     </div>
 
-    <div id="sub-acordes" class="sub">
+    <div id="sub-acordes" class="sub activa">
       <div id="edA-barra" class="barra-sel">
-        <div id="edA-ayuda" class="ayuda">Toca un <b>acorde</b> para moverlo, cambiarlo o quitarlo. Toca una <b>palabra</b> para agregar un acorde ahí.</div>
+        <div id="edA-ayuda" class="ayuda">La canción tal como se ve en el vivo, con su arreglo. <b>⋯</b> en cada sección: mover, repetir, quitar, renombrar, unir. <b>✂</b> en una línea: cortar ahí una sección nueva. Toca un <b>acorde</b> para moverlo, cambiarlo o quitarlo; toca una <b>palabra</b> para agregar un acorde.</div>
         <div id="edA-acorde-sel" hidden>
           <div class="fila"><span>Acorde <b id="edA-nombre-sel"></b> seleccionado · <span id="edA-sel-ayuda">toca la palabra destino para moverlo</span></span></div>
           <div class="fila"><input id="edA-cambiar-txt" placeholder="Nuevo nombre (Am, G7…)"><button id="edA-cambiar">Cambiar</button><button id="edA-duplicar">Duplicar</button><button id="edA-quitar" class="peligro">Quitar</button><button id="edA-cancelar">Cancelar</button></div>

@@ -210,6 +210,18 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #imp-cancion .linea.solo-acordes .seg{margin-right:.7em}
 #imp-cancion .nota{color:#8fb4ff;font-style:italic;font-size:.85em}
 
+#edA-cancion .bloque{border:1px solid var(--borde);border-radius:12px;padding:.3rem .6rem .6rem;margin:.9rem 0;background:rgba(255,255,255,.025)}
+#edA-cancion .bloque-cab{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+#edA-cancion .bloque-cab .nombre{margin:.2em 0;flex:1}
+#edA-cancion .agarre-bloque{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;color:var(--tenue);font-size:1.3rem;padding:.1rem .6rem .1rem .1rem}
+#edA-cancion .bloque.arrastrando{opacity:.55;background:#1c1c1c}
+#edA-cancion.colapsado .bloque > :not(.bloque-cab){display:none} /* mientras se arrastra, solo cabeceras */
+#edA-cancion.colapsado .bloque{margin:.4rem 0;padding:.2rem .6rem}
+#edA-cancion .mas-bloque{padding:.1rem .7rem;font-size:1.3rem;line-height:1.4;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
+#edA-cancion .menu-bloque{display:flex;flex-wrap:wrap;gap:.35rem;margin:.3rem 0 .6rem;padding:.45rem;background:var(--panel);border:1px solid var(--borde);border-radius:10px}
+#edA-cancion .menu-bloque button{font-size:.9rem;padding:.45rem .7rem}
+#edA-cancion .cortar-linea{display:inline-block;vertical-align:bottom;margin-left:.3rem;padding:0 .45rem;font-size:.85rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
+#edA-cancion .sin-usar{margin:1rem 0 .4rem}
 #edA-cancion .mas-linea{display:inline-block;vertical-align:bottom;margin-left:.5rem;padding:0 .5rem;font-size:.9rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
 #edA-cancion .mas-linea:active{color:var(--acorde)}
 

@@ -16,6 +16,13 @@ if (new URLSearchParams(location.search).get('director') === '1') {
 let indice = [];                 // [{id,titulo,artista,tono,...}]
 let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], historial: [], controlCantante: false, tonos: {}, conectados: [] };
 let rol = 'musico';              // rol confirmado por el servidor
+let editorPendiente = null;      // canción cuyo editor estaba abierto al recargar: se reabre tras la bienvenida si el rol es director
+async function restaurarEditor() {
+  const id = editorPendiente; if (!id) return; editorPendiente = null;
+  if (rol !== 'director') return;
+  const sub = prefs.editorSub || 'acordes'; $$('.subtabs button').forEach(x => x.classList.toggle('activa', x.dataset.sub === sub)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + sub));
+  try { if (!indice.length) await cargarIndice(); await abrirEditor(id); } catch { irA('biblioteca'); }
+}
 let ws = null, conectado = false, reintento = 1000;
 const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
 let ultimoGesto = 0; // último toque/rueda/tecla del usuario: solo entonces un scroll cuenta como suyo
@@ -42,6 +49,8 @@ function aviso(t) { const c = $('#conexion-texto'); const antes = c.textContent;
 
 // ---------- pestañas ----------
 function irA(vista) {
+  // la pestaña activa se recuerda en este dispositivo para volver a ella al recargar (Cristhian, 11-sep, fila 167)
+  if (vista !== 'editor' && vista !== 'importar') { prefs.vista = vista; prefs.editorId = null; guardar('prefs', prefs); }
   $$('#tabs button').forEach(b => b.classList.toggle('activa', b.dataset.vista === vista));
   $$('.vista').forEach(v => v.classList.toggle('activa', v.id === 'vista-' + vista));
   if (vista === 'setlists') cargarSetlists();
@@ -61,7 +70,7 @@ function conectar() {
   ws.onopen = () => { reintento = 1000; enviar({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId }); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; actualizarConexion(); aplicarEstado(m.estado); }
+    if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; actualizarConexion(); aplicarEstado(m.estado); restaurarEditor(); }
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
     else if (m.tipo === 'rechazado') aviso('sin permiso');
     else if (m.tipo === 'cancion-cambiada') cancionCambiada(m.id);
@@ -613,7 +622,7 @@ async function cargarInfo() {
 // ---------- edición de canción (director, desde "Canciones") ----------
 const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null, mixAbiertos: new Set(), esMix: false, mixVacio: false };
 const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
-const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género)\s*:/i;
+const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género|importada)\s*:/i;
 const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_PARTE = /^\{\s*parte\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_NOTA = /^\{\s*(nota|comentario|c)\s*:\s*(.*?)\s*\}\s*$/i;
@@ -628,6 +637,7 @@ async function abrirEditor(id) {
   if (rol !== 'director') return aviso('solo el director');
   editor.id = id; editor.selIni = editor.selFin = null; editor.renombrar = null; edA.sel = null; edA.destino = null; edA.historial = [];
   await renderEditor(); if ($('#sub-acordes').classList.contains('activa')) renderEditorAcordes(); irA('editor'); window.scrollTo({ top: 0 });
+  prefs.vista = 'editor'; prefs.editorId = id; guardar('prefs', prefs);
 }
 async function guardarEditor(cho) {
   editor.cho = cho;
@@ -746,7 +756,7 @@ $('#ed-definir').onclick = async () => {
   await guardarEditor(L.join('\n')); renderEditor();
 };
 // ---------- pestaña Acordes: mover, cambiar, agregar y quitar acordes sobre la letra ----------
-const edA = { sel: null, destino: null, historial: [], lineaNueva: null, duplicar: false }; // duplicar: el siguiente toque en una palabra pone una copia del acorde seleccionado, sin quitar el original // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
+const edA = { sel: null, destino: null, historial: [], lineaNueva: null, duplicar: false, menu: null, bloques: [] }; // duplicar: el siguiente toque en una palabra pone una copia del acorde seleccionado, sin quitar el original // lineaNueva = {l, enLaMisma} // sel = {l, ini, fin, texto} acorde seleccionado; destino = {l, ini, fin} palabra elegida
 function piezasLinea(raw) {
   const out = []; let i = 0;
   while (i < raw.length) {
@@ -775,17 +785,56 @@ function renderLineaEdicion(raw, l) {
 function renderEditorAcordes() {
   const panelLetras = $('#edA-letras'); if (panelLetras && panelLetras.parentElement !== $('#edA-barra')) $('#edA-barra').insertBefore(panelLetras, $('#edA-barra').lastElementChild);
   const L = lineasCuerpo(); const art = $('#edA-cancion'); let html = '';
-  L.forEach((raw, l) => {
-    if (META_CAB.test(raw)) return;
-    let m;
-    if ((m = raw.match(RE_SEC))) { html += `<div class="nombre">${esc(m[1] || 'sección sin nombre')}</div>`; return; }
-    if ((m = raw.match(RE_NOTA))) { html += `<div class="nota">${esc(m[2])}</div>`; return; }
-    if (RE_PARTE.test(raw)) return;
-    if (!raw.trim()) { html += '<div class="linea">&nbsp;</div>'; return; }
+  // Estructura (Cristhian, 11-sep, filas 164-165): la canción se pinta por bloques siguiendo el arreglo (con sus repeticiones), como en el vivo;
+  // cada bloque tiene su menú ⋯ y cada línea sus tijeras ✂. Las líneas conservan su índice de archivo (data-l): los acordes se editan igual.
+  const secs = seccionesArchivo(L); const arr = arregloEditor();
+  const bloques = [];
+  if (arr.length) { const veces = {}; for (const n of arr) { const s = secs.find(x => x.nombre.toLowerCase() === n.toLowerCase()); const k = n.toLowerCase(); veces[k] = (veces[k] || 0) + 1; bloques.push({ nombre: n, sec: s || null, vez: veces[k] }); } }
+  else secs.forEach(s => bloques.push({ nombre: s.nombre, sec: s, vez: 1 }));
+  if (arr.length && secs[0] && secs[0].ini < 0) bloques.unshift({ nombre: '', sec: secs[0], vez: 1, suelto: true }); // texto antes de la primera sección
+  const lineaHtml = (l, primera) => {
+    const raw = L[l]; let m;
+    if ((m = raw.match(RE_NOTA))) return `<div class="nota">${esc(m[2])}</div>`;
+    if (!raw.trim()) return '<div class="linea">&nbsp;</div>';
     const r = renderLineaEdicion(raw, l);
-    html += `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}<button class="mas-linea" data-l="${l}" title="${r.soloAcordes ? 'Agregar acordes a esta línea' : 'Agregar una línea solo de acordes debajo'}">＋</button></div>`;
+    return `<div class="linea ${r.soloAcordes ? 'solo-acordes' : ''}" data-l="${l}">${r.html}<button class="mas-linea" data-l="${l}" title="${r.soloAcordes ? 'Agregar acordes a esta línea' : 'Agregar una línea solo de acordes debajo'}">＋</button>${primera ? '' : `<button class="cortar-linea" data-l="${l}" title="Cortar aquí: empieza una sección nueva en esta línea">✂</button>`}</div>`;
+  };
+  bloques.forEach((b, j) => {
+    const titulo = b.suelto ? 'sin sección' : (b.nombre || 'sección sin nombre') + (b.vez > 1 ? ` · ${b.vez}ª vez` : '');
+    html += `<div class="bloque" data-j="${j}"><div class="bloque-cab">${b.suelto ? '' : `<span class="agarre agarre-bloque" title="Arrastra para mover esta sección">≡</span>`}<div class="nombre">${esc(titulo)}</div>${b.suelto ? '' : `<button class="mas-bloque" data-j="${j}" title="Opciones de esta sección">⋯</button>`}</div>`;
+    if (!b.sec) html += `<div class="nota">esta sección está en el arreglo pero no existe en la canción</div>`;
+    else { let primera = true; for (const l of b.sec.lineas) { if (L[l].trim() && !RE_NOTA.test(L[l])) { html += lineaHtml(l, primera); primera = false; } else html += lineaHtml(l, true); } }
+    html += '</div>';
   });
+  const usados = new Set(bloques.map(b => b.nombre.toLowerCase())); const sinUsar = secs.filter(s => s.nombre && !usados.has(s.nombre.toLowerCase()));
+  if (sinUsar.length) html += `<div class="sin-usar"><div class="ayuda">Secciones definidas que no están en el arreglo (toca una para agregarla al final):</div><div class="chips">${sinUsar.map(s => `<button class="usar-seccion" data-nombre="${esc(s.nombre)}">+ ${esc(s.nombre)}</button>`).join('')}</div></div>`;
   art.innerHTML = html;
+  edA.bloques = bloques;
+  // arrastrar bloques desde el asa ≡ (eventos en el documento, con desplazamiento automático cerca de los bordes); al soltar, el orden en pantalla pasa al arreglo
+  art.querySelectorAll('.agarre-bloque').forEach(asa => asa.addEventListener('pointerdown', e => {
+    if (e.button && e.button !== 0) return; e.preventDefault();
+    const li = asa.closest('.bloque'); li.classList.add('arrastrando'); try { asa.setPointerCapture(e.pointerId); } catch {}
+    // al arrastrar, todos los bloques se pliegan a su cabecera (Cristhian, 11-sep) y el bloque agarrado se mantiene bajo el dedo
+    const antes = li.getBoundingClientRect().top; art.classList.add('colapsado'); window.scrollBy(0, li.getBoundingClientRect().top - antes);
+    let ultimoY = e.clientY, auto = null;
+    const paso = () => { const h = window.innerHeight; if (ultimoY < 90) window.scrollBy(0, -12); else if (ultimoY > h - 90) window.scrollBy(0, 12); auto = requestAnimationFrame(paso); };
+    auto = requestAnimationFrame(paso);
+    const mover = ev => {
+      if (ev.pointerId !== e.pointerId) return; ev.preventDefault(); ultimoY = ev.clientY;
+      const bajo = document.elementFromPoint(ev.clientX, ev.clientY); const otro = bajo && bajo.closest('#edA-cancion > .bloque');
+      if (!otro || otro === li) return;
+      const r = otro.getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2) otro.before(li); else otro.after(li);
+    };
+    const soltar = ev => {
+      if (ev && ev.pointerId !== e.pointerId) return;
+      document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar); cancelAnimationFrame(auto);
+      li.classList.remove('arrastrando'); art.classList.remove('colapsado');
+      const orden = [...art.querySelectorAll(':scope > .bloque')].map(el => edA.bloques[Number(el.dataset.j)]).filter(b => b && !b.suelto).map(b => b.nombre);
+      if (orden.join('|') !== ordenActual().join('|')) { edA.menu = null; guardarAcordes(conArreglo(editor.cho, orden)); } else renderEditorAcordes();
+    };
+    document.addEventListener('pointermove', mover, { passive: false }); document.addEventListener('pointerup', soltar); document.addEventListener('pointercancel', soltar);
+  }));
+  if (edA.menu !== null && edA.menu !== undefined) { const cab = art.querySelector(`.bloque[data-j="${edA.menu}"] .bloque-cab`); if (cab) cab.insertAdjacentElement('afterend', menuBloque(edA.menu)); }
   if (edA.sel) { const a = art.querySelector(`.ac[data-l="${edA.sel.l}"][data-ini="${edA.sel.ini}"]`); if (a) a.classList.add('sel'); }
   if (edA.destino) { const pl = art.querySelector(`.pal[data-l="${edA.destino.l}"][data-ini="${edA.destino.ini}"]`); if (pl) pl.classList.add('destino'); }
   $('#edA-acorde-sel').hidden = !edA.sel || !!edA.destino;
@@ -796,6 +845,51 @@ function renderEditorAcordes() {
   $('#edA-estado').textContent = estado === 'corregida' ? '✓ Corregida (volver a "importada")' : 'Marcar como corregida';
   $('#edA-estado').className = estado === 'corregida' ? '' : 'primario';
   if (edA.sel) { $('#edA-nombre-sel').textContent = edA.sel.texto; $('#edA-sel-ayuda').textContent = edA.duplicar ? 'toca la palabra donde va la copia' : 'toca la palabra destino para moverlo'; $('#edA-duplicar').classList.toggle('primario', edA.duplicar); }
+}
+// --- estructura: secciones del archivo, arreglo y operaciones (todas se guardan al instante, con deshacer) ---
+function seccionesArchivo(L) { // [{nombre, ini: línea del marcador (-1 si es texto suelto), lineas: [índices]}]
+  const secs = []; let cur = null;
+  L.forEach((raw, l) => {
+    if (META_CAB.test(raw) || RE_PARTE.test(raw)) return;
+    const m = raw.match(RE_SEC);
+    if (m) { cur = { nombre: (m[1] || '').trim(), ini: l, lineas: [] }; secs.push(cur); return; }
+    if (!cur) { if (!raw.trim()) return; cur = { nombre: '', ini: -1, lineas: [] }; secs.push(cur); }
+    cur.lineas.push(l);
+  });
+  return secs;
+}
+function arregloEditor() { return nombresArreglo(parsear(editor.cho)); }
+function ordenActual() { return (edA.bloques || []).filter(b => !b.suelto).map(b => b.nombre); } // orden en pantalla = arreglo (o natural si no hay)
+function menuBloque(j) {
+  const b = edA.bloques[j]; const n = edA.bloques.filter(x => !x.suelto).length; const idx = edA.bloques.filter((x, k) => !x.suelto && k < j).length;
+  const div = document.createElement('div'); div.className = 'menu-bloque';
+  const guardarOrden = arr => { edA.menu = null; guardarAcordes(conArreglo(editor.cho, arr)); };
+  if (idx > 0) div.append(boton('↑ Mover arriba', () => { const a = ordenActual(); [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; guardarOrden(a); }));
+  if (idx < n - 1) div.append(boton('↓ Mover abajo', () => { const a = ordenActual(); [a[idx + 1], a[idx]] = [a[idx], a[idx + 1]]; guardarOrden(a); }));
+  div.append(boton('⧉ Repetir después', () => { const a = ordenActual(); a.splice(idx + 1, 0, b.nombre); guardarOrden(a); }));
+  if (n > 1) div.append(boton('✕ Quitar esta aparición', () => { const a = ordenActual(); a.splice(idx, 1); guardarOrden(a); }, 'peligro'));
+  if (b.sec) {
+    div.append(boton('✎ Renombrar', () => {
+      const nuevo = (prompt('Nuevo nombre de la sección (cambia en todas sus repeticiones):', b.nombre) || '').trim(); if (!nuevo || nuevo === b.nombre) return;
+      const L = lineasCuerpo(); if (b.sec.ini >= 0) L[b.sec.ini] = `{seccion: ${nuevo}}`;
+      const a = ordenActual().map(x => x.toLowerCase() === b.nombre.toLowerCase() ? nuevo : x); edA.menu = null; guardarAcordes(conArreglo(L.join('\n'), arregloEditor().length ? a : []));
+    }));
+    const L = lineasCuerpo(); const secs = seccionesArchivo(L); const pos = secs.findIndex(s => s.ini === b.sec.ini);
+    if (pos > 0 && b.sec.ini >= 0) div.append(boton('⤴ Unir con la sección anterior', () => {
+      if (!confirm(`¿Unir “${b.nombre}” con “${secs[pos - 1].nombre || 'la sección anterior'}”? Sus líneas pasan a esa sección, en todas las repeticiones.`)) return;
+      const L2 = lineasCuerpo(); L2.splice(b.sec.ini, 1); const a = ordenActual().filter(x => x.toLowerCase() !== b.nombre.toLowerCase()); edA.menu = null; guardarAcordes(conArreglo(L2.join('\n'), arregloEditor().length ? a : []));
+    }));
+  }
+  div.append(boton('Cerrar', () => { edA.menu = null; renderEditorAcordes(); }));
+  return div;
+}
+function cortarEn(l) { // una sección nueva empieza en la línea l (índice de archivo)
+  const L = lineasCuerpo(); const secs = seccionesArchivo(L); const cont = secs.find(s => s.lineas.includes(l));
+  const nombre = (prompt('Nombre de la sección nueva que empieza aquí:', '') || '').trim(); if (!nombre) return;
+  L.splice(l, 0, `{seccion: ${nombre}}`);
+  let arr = arregloEditor();
+  if (arr.length && cont && cont.nombre) { const out = []; for (const x of arr) { out.push(x); if (x.toLowerCase() === cont.nombre.toLowerCase()) out.push(nombre); } arr = out; }
+  edA.menu = null; guardarAcordes(conArreglo(L.join('\n'), arr));
 }
 async function guardarAcordes(nuevoCho) {
   edA.historial.push(editor.cho); if (edA.historial.length > 50) edA.historial.shift();
@@ -867,6 +961,9 @@ function mostrarAgregarLinea(l, enLaMisma) {
   $('#edA-agregar-txt').focus();
 }
 $('#edA-cancion').addEventListener('click', e => {
+  const mb = e.target.closest('.mas-bloque'); if (mb) { const j = Number(mb.dataset.j); edA.menu = edA.menu === j ? null : j; renderEditorAcordes(); return; }
+  const cl = e.target.closest('.cortar-linea'); if (cl) { cortarEn(Number(cl.dataset.l)); return; }
+  const us = e.target.closest('.usar-seccion'); if (us) { const a = ordenActual(); a.push(us.dataset.nombre); guardarAcordes(conArreglo(editor.cho, a)); return; }
   const mas = e.target.closest('.mas-linea');
   if (mas) { const l = Number(mas.dataset.l); mostrarAgregarLinea(l, mas.closest('.linea').classList.contains('solo-acordes')); return; }
   const ac = e.target.closest('.ac'); const pal = e.target.closest('.pal');
@@ -962,7 +1059,7 @@ $('#ed-es-guardar').onclick = async () => {
   cerrarEditarSeccion(); await guardarEditor(L.join('\n')); aviso('guardado'); renderEditor();
 };
 // sub-pestañas de la edición
-$$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').forEach(x => x.classList.toggle('activa', x === b)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + b.dataset.sub)); if (b.dataset.sub === 'acordes') renderEditorAcordes(); });
+$$('.subtabs button').forEach(b => b.onclick = () => { $$('.subtabs button').forEach(x => x.classList.toggle('activa', x === b)); $$('.sub').forEach(x => x.classList.toggle('activa', x.id === 'sub-' + b.dataset.sub)); if (b.dataset.sub === 'acordes') renderEditorAcordes(); prefs.editorSub = b.dataset.sub; guardar('prefs', prefs); });
 function renderArreglo() {
   const ol = $('#ed-arreglo-lista'); ol.innerHTML = '';
   editor.arreglo.forEach((n, i) => {
@@ -1233,4 +1330,7 @@ document.addEventListener('touchend', e => { const ahora = Date.now(); if (ahora
 llenarPerfil(); actualizarConexion(); actualizarControles();
 document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 cargarIndice().then(conectar);
+// al cargar: sin perfil → "Yo"; si no, la pestaña (y la canción del editor) donde estaba este dispositivo
 if (!perfil.nombre) irA('ajustes');
+else if (prefs.vista === 'editor' && prefs.editorId) { editorPendiente = prefs.editorId; irA('biblioteca'); } // el editor se abre cuando el servidor confirme el rol (bienvenida)
+else if (prefs.vista && prefs.vista !== 'editor' && $(`#tabs button[data-vista="${prefs.vista}"]`)) irA(prefs.vista);
