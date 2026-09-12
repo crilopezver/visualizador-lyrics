@@ -6,7 +6,9 @@ const $$ = s => [...document.querySelectorAll(s)];
 const cargar = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'pagina', lineas: 4, ajustar: true }); // paso: página | sección | líneas (botones y pedal)
+const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico', pin: '', vista: 'acordes', cejilla: false, botones: true, paso: 'seccion', lineas: 4, ajustar: true }); // paso: página | sección | líneas (botones y pedal). Por defecto sección (Cristhian, 11-sep, fila 184)
+// una sola vez: los perfiles guardados antes del 11-sep traían "página" sin haberlo elegido; pasan a sección. Desde ahora, cambiarlo en "Yo" es decisión de cada uno (pasoElegido).
+if (!perfil.pasoElegido && !perfil.pasoMigrado) { perfil.paso = 'seccion'; perfil.pasoMigrado = true; guardar('perfil', perfil); }
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {}, orden: 'importada' }); // orden: importada | titulo | artista (biblioteca)
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
@@ -24,6 +26,9 @@ async function restaurarEditor() {
   try { if (!indice.length) await cargarIndice(); await abrirEditor(id); } catch { irA('biblioteca'); }
 }
 let ws = null, conectado = false, reintento = 1000;
+let estuvoSinRed = false; // hubo conexión y se perdió: al reconectar se vuelve a seguir al vivo aunque se haya navegado por cuenta propia
+let ultimoMensaje = 0; // vigilancia: si en 45 s no llega nada del servidor (latido cada 20 s), la conexión se da por muerta y se reconecta (Paper 10, hallazgo 3)
+setInterval(() => { if (conectado && ultimoMensaje && Date.now() - ultimoMensaje > 45000) { aviso('reconectando…'); try { ws.close(); } catch {} } }, 10000);
 const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
 let ultimoGesto = 0; // último toque/rueda/tecla del usuario: solo entonces un scroll cuenta como suyo
 let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
@@ -70,12 +75,14 @@ function conectar() {
   ws.onopen = () => { reintento = 1000; enviar({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId }); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; actualizarConexion(); aplicarEstado(m.estado); restaurarEditor(); }
+    ultimoMensaje = Date.now();
+    if (m.tipo === 'latido') return;
+    if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; if (estuvoSinRed) { estuvoSinRed = false; modo = puedeMover() ? 'lider' : 'siguiendo'; } actualizarConexion(); aplicarEstado(m.estado); restaurarEditor(); } // tras una caída, vuelve a seguir al vivo
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
     else if (m.tipo === 'rechazado') aviso('sin permiso');
     else if (m.tipo === 'cancion-cambiada') cancionCambiada(m.id);
   };
-  ws.onclose = () => { conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); };
+  ws.onclose = () => { if (conectado && ultimoMensaje) estuvoSinRed = true; conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 function programarReintento() { setTimeout(conectar, reintento); reintento = Math.min(reintento * 1.6, 8000); }
@@ -111,13 +118,14 @@ function aplicarEstado(e) {
 }
 function actualizarControles() {
   const lider = puedeMover() && conectado && modo !== 'libre';
-  const mostrarBarra = lider && (rol === 'director' || perfil.botones !== false); // el director siempre; el cantante puede ocultarla
+  const sinRed = !conectado && ultimoMensaje > 0 && !!estado.vivo.cancion; // hubo conexión y se perdió: cada uno sigue por su cuenta con la cola que tenía (Paper 10, hallazgo 7)
+  const mostrarBarra = (lider && (rol === 'director' || perfil.botones !== false)) || sinRed; // el director siempre; el cantante puede ocultarla; sin red, todos
   $('#controles-lider').hidden = !mostrarBarra;
   document.body.classList.toggle('con-barra', puedeMover() && conectado && (rol === 'director' || perfil.botones !== false)); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
   $('#btn-volver').hidden = modo !== 'libre';
   const p = $('#vivo-modo');
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');
-  p.textContent = modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · lo guardado sigue disponible';
+  p.textContent = sinRed ? 'sin red · sigues por tu cuenta: ▶▶ pasa la cola en este celular' : modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · lo guardado sigue disponible';
   $('#panel-director').hidden = rol !== 'director';
   $('#siguiente-acciones').hidden = !(rol === 'director' && estado.siguiente.length);
   $('#ctl-cejilla').style.display = (perfil.cejilla || perfil.instrumento === 'guitarra') ? '' : 'none';
@@ -179,7 +187,12 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0, nueva = fa
       if (cambioCancion) { ultimoGesto = 0; scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac), { instantaneo: true }); }
       else scrollA(scrollDePosicion(mostrando.seccion, mostrando.frac));
     }
-  } catch (e) { $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Sin red solo están las canciones ya guardadas en este teléfono.</p>`; }
+  } catch (e) {
+    $('#cancion').innerHTML = `<p class="vacio">No se pudo abrir la canción (${e.message}). Reintentando…</p>`;
+    // reintento solo (WiFi que parpadea): hasta 10 veces cada 2 s mientras siga siendo la canción pedida
+    mostrando.reintentos = (mostrando.reintentoId === id ? (mostrando.reintentos || 0) : 0) + 1; mostrando.reintentoId = id;
+    if (mostrando.reintentos <= 10) setTimeout(() => { if (mostrando.reintentoId === id && mostrando.id !== id) mostrar(id, seccion, { desplazar, frac, nueva }); }, 2000);
+  }
 }
 let scrollObjetivo = 0; // destino del último desplazamiento automático (si aún no terminó, los cálculos parten de ahí)
 function scrollA(top, { instantaneo = false } = {}) {
@@ -383,8 +396,21 @@ $('#previa-tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1
 $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
-$('#lider-pasar').onclick = () => { if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
-$('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
+// sin red, ▶▶ y ◀◀ mueven la cola de este celular (copia local); al volver la red, el estado del servidor manda de nuevo
+function pasarLocal() {
+  if (!estado.siguiente.length) return aviso('cola vacía');
+  if (estado.vivo.cancion) estado.historial = [...(estado.historial || []), estado.vivo.cancion];
+  const id = estado.siguiente.shift(); estado.vivo = { ...estado.vivo, cancion: id, seccion: 0, frac: 0, carga: (estado.vivo.carga || 0) + 1 };
+  $('#n-siguiente').textContent = estado.siguiente.length || ''; renderSiguiente(); mostrar(id, 0, { nueva: true });
+}
+function anteriorLocal() {
+  if (!(estado.historial || []).length) return aviso('no hay canción anterior');
+  const previa = estado.historial.pop(); if (estado.vivo.cancion) estado.siguiente.unshift(estado.vivo.cancion);
+  estado.vivo = { ...estado.vivo, cancion: previa, seccion: 0, frac: 0, carga: (estado.vivo.carga || 0) + 1 };
+  $('#n-siguiente').textContent = estado.siguiente.length || ''; renderSiguiente(); mostrar(previa, 0, { nueva: true });
+}
+$('#lider-pasar').onclick = () => { if (!conectado) return pasarLocal(); if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
+$('#lider-anterior').onclick = () => { if (!conectado) return anteriorLocal(); if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
 document.addEventListener('keydown', ev => {
@@ -392,8 +418,8 @@ document.addEventListener('keydown', ev => {
   if (!$('#vista-vivo').classList.contains('activa')) return;
   // Pedal M-Wave (Paper 09): ↓ canción siguiente y ↑ canción anterior (como ▶▶ y ◀◀ de la barra; solo quien controla el vivo),
   // ←→ por sección siempre (Cristhian, 09-sep, filas 125 y 128); las demás teclas siguen el modo configurado en "Yo"
-  if (ev.key === 'ArrowDown') { ev.preventDefault(); if (puedeMover() && modo === 'lider') $('#lider-pasar').onclick(); }
-  else if (ev.key === 'ArrowUp') { ev.preventDefault(); if (puedeMover() && modo === 'lider') $('#lider-anterior').onclick(); }
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); if ((puedeMover() && modo === 'lider') || !conectado) $('#lider-pasar').onclick(); }
+  else if (ev.key === 'ArrowUp') { ev.preventDefault(); if ((puedeMover() && modo === 'lider') || !conectado) $('#lider-anterior').onclick(); }
   else if (ev.key === 'ArrowRight') { ev.preventDefault(); moverPorSeccion(1); }
   else if (ev.key === 'ArrowLeft') { ev.preventDefault(); moverPorSeccion(-1); }
   else if (['PageDown', ' ', 'Enter'].includes(ev.key)) { ev.preventDefault(); moverSeccion(1); }
@@ -430,7 +456,7 @@ $('#cancion').addEventListener('pointerdown', e => {
 $('#cancion').addEventListener('pointermove', e => { if (toque && (Math.abs(e.clientX - toque.x) > 10 || Math.abs(e.clientY - toque.y) > 10)) clearTimeout(tPresion); });
 $('#cancion').addEventListener('pointercancel', () => clearTimeout(tPresion));
 $('#cancion').addEventListener('contextmenu', e => { e.preventDefault(); clearTimeout(tPresion); marcarAqui(e.target); toque = null; });
-$('#cancion').addEventListener('click', e => { if (e.target.closest('.btn-pasar')) { e.stopPropagation(); enviar({ tipo: 'siguiente', accion: 'pasar' }); } });
+$('#cancion').addEventListener('click', e => { if (e.target.closest('.btn-pasar')) { e.stopPropagation(); $('#lider-pasar').onclick(); } });
 $('#cancion').addEventListener('pointerup', e => {
   clearTimeout(tPresion);
   if (e.target.closest('.btn-pasar')) { toque = null; return; }
@@ -623,6 +649,7 @@ function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre'
 $('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
+  if (f.elements.paso.value !== perfil.paso) perfil.pasoElegido = true; // lo cambió a mano: ya es su elección
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso']) perfil[k] = f.elements[k].value;
   perfil.lineas = Math.max(1, Math.min(10, Number(f.elements.lineas.value) || 4)); f.elements.lineas.value = perfil.lineas;
   perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked; perfil.ajustar = f.elements.ajustar.checked;
@@ -1505,7 +1532,12 @@ document.addEventListener('visibilitychange', () => {
   // al volver del segundo plano, reubicarse en el vivo (las animaciones no corren con la pantalla apagada)
   if (modo !== 'libre' && estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 });
 });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // versión nueva instalada (el sw la precargó completa): se avisa y cada uno recarga cuando le convenga; nunca sola en medio de una canción
+  navigator.serviceWorker.addEventListener('message', ev => { if (ev.data && ev.data.tipo === 'nueva-version' && navigator.serviceWorker.controller) $('#actualizar').hidden = false; });
+  $('#actualizar').onclick = () => location.reload();
+}
 // bloquear el zoom de la interfaz (pellizco y doble toque) en Safari; la letra se agranda con A− / A+
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
 document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
@@ -1514,7 +1546,17 @@ document.addEventListener('touchend', e => { const ahora = Date.now(); if (ahora
 
 llenarPerfil(); actualizarConexion(); actualizarControles();
 document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
-cargarIndice().then(conectar);
+cargarIndice().then(conectar).then(() => setTimeout(precargarTodo, 1500));
+// Precarga total (Paper 10, hallazgos 2 y 7): con conexión, cada celular guarda en silencio todo el repertorio y los setlists,
+// así sin red cualquier canción abre (el service worker las conserva) y los cambios de canción no dependen del WiFi en ese instante.
+let precargando = false;
+async function precargarTodo() {
+  if (precargando) return; precargando = true;
+  try {
+    for (const c of indice) { if (!cacheCho.has(c.id)) { try { await obtenerCho(c.id); } catch { break; } } }
+    try { const ls = await api('/api/setlists'); for (const s of ls) { try { await api(`/api/setlists/${s.id}`); } catch {} } } catch {}
+  } finally { precargando = false; }
+}
 // al cargar: sin perfil → "Yo"; si no, la pestaña (y la canción del editor) donde estaba este dispositivo
 if (!perfil.nombre) irA('ajustes');
 else if (prefs.vista === 'editor' && prefs.editorId) { editorPendiente = prefs.editorId; irA('biblioteca'); } // el editor se abre cuando el servidor confirme el rol (bienvenida)

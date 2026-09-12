@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { Almacen } from './almacen.js';
 import { Estado } from './estado.js';
@@ -14,6 +15,15 @@ const WEB = path.join(RAIZ_APP, 'web');
 const PUERTO = Number(process.env.PUERTO || 8080);
 const VERSION = JSON.parse(fs.readFileSync(path.join(RAIZ_APP, 'package.json'), 'utf8')).version;
 const ARRANQUE = Date.now();
+// Huella de la app: cambia con cualquier cambio en los archivos del cliente. Se inyecta en sw.js para que cada despliegue
+// sea una caché nueva y completa (los celulares no mezclan versiones; Paper 10, hallazgo 1).
+const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'manifest.webmanifest', 'icono.svg'];
+function huellaApp() {
+  const h = crypto.createHash('sha1');
+  for (const f of ARCHIVOS_APP) { try { h.update(fs.readFileSync(path.join(AQUI, '..', 'web', f))); } catch {} }
+  return h.digest('hex').slice(0, 10);
+}
+const HUELLA = huellaApp();
 
 // Carpeta de datos: variable DATOS, o ../datos (fuera del repo); si no existe, datos.ejemplo.
 let DATOS = process.env.DATOS ? path.resolve(process.env.DATOS) : path.join(RAIZ_APP, '..', 'datos');
@@ -64,7 +74,7 @@ const servidor = http.createServer(async (req, res) => {
       const rec = partes[1], id = partes[2];
       const local = esLocal(req);
       let rol = rolPorPin(req.headers['x-pin']); if (rol === 'musico' && local) rol = 'director';
-      if (rec === 'info') return json(res, 200, { version: VERSION, puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
+      if (rec === 'info') return json(res, 200, { version: VERSION, huella: HUELLA, puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
       if (rec === 'apagar') { // solo desde la propia Mac (panel de control)
         if (!local || req.method !== 'POST') return json(res, 403, { error: 'solo desde la Mac' });
         json(res, 200, { ok: true }); console.log('Apagado desde el panel de la Mac.'); setTimeout(() => process.exit(0), 300); return;
@@ -113,6 +123,10 @@ const servidor = http.createServer(async (req, res) => {
     }
     // ---------- estáticos ----------
     let rel = p === '/' ? '/index.html' : p === '/mac' ? '/mac.html' : p;
+    if (rel === '/sw.js') { // versión de caché = huella de la app de este arranque
+      const sw = fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8').replace(/const VERSION = '[^']*';/, `const VERSION = 'v${VERSION}-${HUELLA}';`);
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(sw);
+    }
     const ruta = path.normalize(path.join(WEB, rel));
     if (!ruta.startsWith(WEB) || !fs.existsSync(ruta) || fs.statSync(ruta).isDirectory()) { res.writeHead(404); return res.end('no encontrado'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(ruta)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
@@ -155,6 +169,8 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => { estado.conectados.delete(ws); difundir(); });
 });
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 25000);
+// latido visible para el cliente (los pings del protocolo no llegan al JavaScript del celular): si un celular deja de recibirlo, reconecta solo (Paper 10, hallazgo 3)
+setInterval(() => { const m = JSON.stringify({ tipo: 'latido' }); for (const c of wss.clients) if (c.readyState === 1) c.send(m); }, 20000);
 
 servidor.listen(PUERTO, '0.0.0.0', () => {
   console.log(`\nVisualizador Lyrics v${VERSION} · datos: ${DATOS}`);
