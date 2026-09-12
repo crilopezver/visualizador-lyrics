@@ -258,7 +258,7 @@ function pintar() {
   $('#btn-cantante').hidden = rol !== 'director';
   mostrando.pintadoId = id;
   const art = $('#cancion');
-  art.className = 'vista-' + perfil.vista;
+  art.className = 'lienzo vista-' + perfil.vista; // 'lienzo' lleva los estilos compartidos con la Previa (commit 23); se perdía al pintar (fila 188)
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: mostrando.seccion, secciones: mostrando.expandidas });
   pintarSigue();
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');

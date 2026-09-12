@@ -18,12 +18,14 @@ const ARRANQUE = Date.now();
 // Huella de la app: cambia con cualquier cambio en los archivos del cliente. Se inyecta en sw.js para que cada despliegue
 // sea una caché nueva y completa (los celulares no mezclan versiones; Paper 10, hallazgo 1).
 const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'manifest.webmanifest', 'icono.svg'];
-function huellaApp() {
+let huellaCache = { firma: '', valor: '' };
+function huellaApp() { // se recalcula sola cuando cambia algún archivo (por fecha y tamaño), sin relanzar el servidor
+  const firma = ARCHIVOS_APP.map(f => { try { const st = fs.statSync(path.join(AQUI, '..', 'web', f)); return f + st.mtimeMs + st.size; } catch { return f; } }).join('|');
+  if (firma === huellaCache.firma) return huellaCache.valor;
   const h = crypto.createHash('sha1');
   for (const f of ARCHIVOS_APP) { try { h.update(fs.readFileSync(path.join(AQUI, '..', 'web', f))); } catch {} }
-  return h.digest('hex').slice(0, 10);
+  huellaCache = { firma, valor: h.digest('hex').slice(0, 10) }; return huellaCache.valor;
 }
-const HUELLA = huellaApp();
 
 // Carpeta de datos: variable DATOS, o ../datos (fuera del repo); si no existe, datos.ejemplo.
 let DATOS = process.env.DATOS ? path.resolve(process.env.DATOS) : path.join(RAIZ_APP, '..', 'datos');
@@ -74,7 +76,7 @@ const servidor = http.createServer(async (req, res) => {
       const rec = partes[1], id = partes[2];
       const local = esLocal(req);
       let rol = rolPorPin(req.headers['x-pin']); if (rol === 'musico' && local) rol = 'director';
-      if (rec === 'info') return json(res, 200, { version: VERSION, huella: HUELLA, puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
+      if (rec === 'info') return json(res, 200, { version: VERSION, huella: huellaApp(), puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
       if (rec === 'apagar') { // solo desde la propia Mac (panel de control)
         if (!local || req.method !== 'POST') return json(res, 403, { error: 'solo desde la Mac' });
         json(res, 200, { ok: true }); console.log('Apagado desde el panel de la Mac.'); setTimeout(() => process.exit(0), 300); return;
@@ -124,7 +126,7 @@ const servidor = http.createServer(async (req, res) => {
     // ---------- estáticos ----------
     let rel = p === '/' ? '/index.html' : p === '/mac' ? '/mac.html' : p;
     if (rel === '/sw.js') { // versión de caché = huella de la app de este arranque
-      const sw = fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8').replace(/const VERSION = '[^']*';/, `const VERSION = 'v${VERSION}-${HUELLA}';`);
+      const sw = fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8').replace(/const VERSION = '[^']*';/, `const VERSION = 'v${VERSION}-${huellaApp()}';`);
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(sw);
     }
     const ruta = path.normalize(path.join(WEB, rel));
