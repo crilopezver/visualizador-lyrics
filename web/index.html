@@ -20,6 +20,7 @@
     <button data-vista="siguiente">Siguiente <span id="n-siguiente" class="pill"></span></button>
     <button data-vista="biblioteca">Canciones</button>
     <button data-vista="setlists">Setlists</button>
+    <button data-vista="previa">Previa</button>
     <button data-vista="ajustes">Yo</button>
   </nav>
   <div id="conexion" title="estado de la conexión"><span class="punto"></span><span id="conexion-texto">…</span></div>
@@ -42,7 +43,7 @@
         <button id="btn-nota" class="ctl-btn" title="Mi nota personal">✎ Mi nota</button>
       </div>
     </div>
-    <article id="cancion"></article>
+    <article id="cancion" class="lienzo"></article>
     <div id="nota-panel" hidden>
       <div class="nota-cab">Mi nota personal (solo la ves tú)</div>
       <textarea id="nota-texto" rows="4" placeholder="Lo que quieras recordar de esta canción…"></textarea>
@@ -55,6 +56,21 @@
       <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
       <button id="lider-next">▼ avanzar</button>
     </div>
+  </section>
+
+  <!-- PREVIA: ver una canción sin tocar el vivo (Cristhian, 11-sep, fila 180) -->
+  <section id="vista-previa" class="vista">
+    <div id="previa-cab">
+      <div id="previa-titulo">Nada en vista previa</div>
+      <div id="previa-sub" class="sub">Toca “Ver” en Canciones, en la cola o en un setlist.</div>
+      <div class="fila" id="previa-acciones" hidden>
+        <button id="previa-editar" class="primario" hidden>✎ Editar</button>
+        <button id="previa-vivo" hidden>▶ Vivo</button>
+        <button id="previa-cola" hidden>+ Cola</button>
+        <label class="ctl">Letra <button id="previa-tam-menos">A−</button><button id="previa-tam-mas">A+</button></label>
+      </div>
+    </div>
+    <article id="cancion-previa" class="lienzo"></article>
   </section>
 
   <!-- SIGUIENTE (cola) -->
@@ -145,7 +161,7 @@
 
     <div id="sub-acordes" class="sub activa">
       <div id="edA-barra" class="barra-sel">
-        <div id="edA-ayuda" class="ayuda">La canción como en el vivo, con su arreglo. <b>Toca una sección</b> para editarla como texto: acordes arriba, letra abajo; los acordes se mueven con espacios o arrastrándolos; tocar fuera guarda. <b>⋯</b>: mover, repetir, quitar, renombrar, unir. <b>✂</b>: cortar una sección nueva en esa línea. <b>Clic derecho o pulsación larga</b> en una línea: nota.</div>
+        <div id="edA-ayuda" class="ayuda" hidden>La canción como en el vivo, con su arreglo. <b>Toca una sección</b> para editarla como texto: acordes arriba, letra abajo; los acordes se mueven con espacios o arrastrándolos; tocar fuera guarda. <b>⋯</b>: mover, repetir, quitar, renombrar, unir. <b>✂</b>: aquí termina la sección, lo que sigue pasa a una nueva. <b>Clic derecho o pulsación larga</b> en una línea: nota.</div>
         <div id="edA-acorde-sel" hidden>
           <div class="fila"><span>Acorde <b id="edA-nombre-sel"></b> seleccionado · <span id="edA-sel-ayuda">toca la palabra destino para moverlo</span></span></div>
           <div class="fila"><input id="edA-cambiar-txt" placeholder="Nuevo nombre (Am, G7…)"><button id="edA-cambiar">Cambiar</button><button id="edA-duplicar">Duplicar</button><button id="edA-quitar" class="peligro">Quitar</button><button id="edA-cancelar">Cancelar</button></div>
@@ -157,7 +173,7 @@
           <div id="edA-chips" class="chips"></div>
           <div class="fila"><button id="edA-letras-cancelar">Cancelar</button></div>
         </div>
-        <div class="fila"><button id="edA-deshacer">↶ Deshacer</button><button id="edA-estado"></button></div>
+        <div class="fila edA-fila"><button id="edA-deshacer">↶ Deshacer</button><button id="edA-estado"></button><button id="edA-ayuda-btn" class="mini" title="Cómo se usa">?</button></div>
       </div>
       <article id="edA-cancion"></article>
     </div>

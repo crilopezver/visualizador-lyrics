@@ -47,7 +47,10 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 .vista{display:none}.vista.activa{display:block}
 
 /* en vivo */
-#vivo-cabecera{margin-bottom:.6rem}
+#vivo-cabecera,#previa-cab{margin-bottom:.6rem}
+#previa-titulo{font-size:1.35rem;font-weight:800;line-height:1.2}
+#previa-sub{color:var(--tenue);font-size:.9rem}
+#previa-acciones{margin-top:.5rem}
 #vivo-titulo{font-size:1.35rem;font-weight:800;line-height:1.2}
 #vivo-sub{color:var(--tenue);font-size:.9rem}
 #vivo-herr{display:flex;flex-wrap:wrap;gap:.4rem .8rem;align-items:center;margin-top:.5rem;font-size:.85rem;color:var(--tenue)}
@@ -60,32 +63,32 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 .modo-libre{background:#2b1d05;color:var(--acorde)}
 .modo-lider{background:#0b2450;color:#8fb4ff}
 
-#cancion{font-size:calc(var(--tam) * var(--ajuste, 1));line-height:1.25} /* --ajuste: reducción automática para que quepa la sección */
-#cancion .seccion{margin:1.1em 0 .4em;padding-top:.3em;border-top:1px solid var(--borde)}
-#cancion .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin-bottom:.35em}
+.lienzo{font-size:calc(var(--tam) * var(--ajuste, 1));line-height:1.25} /* --ajuste: reducción automática para que quepa la sección */
+.lienzo .seccion{margin:1.1em 0 .4em;padding-top:.3em;border-top:1px solid var(--borde)}
+.lienzo .nombre{font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);font-weight:700;margin-bottom:.35em}
 .nombre .tono{text-transform:none;letter-spacing:0} /* el acorde del tono respeta su minúscula: Am, no AM (Cristhian, 11-sep) */
-#cancion .linea{margin:.15em 0;white-space:normal}
-#cancion .pal{display:inline-block;white-space:nowrap;vertical-align:bottom}
-#cancion .esp{display:inline-block;white-space:pre;vertical-align:bottom}
-#cancion .seg{display:inline-block;vertical-align:bottom;white-space:pre}
-#cancion .ac{display:block;color:var(--acorde);font-weight:800;font-size:.9em;line-height:1.1;min-height:1.1em}
-#cancion .tx{display:block}
-#cancion .seg.cola .ac,#cancion .seg.antes-ac .ac{padding-right:.4em} /* acordes seguidos (vo[Gm]z[G7], voz[Gm][G7]) no se pegan */
-#cancion .linea.solo-acordes .ac{font-size:1em}
-#cancion .linea.solo-acordes .tx{display:none}
-#cancion .linea.solo-acordes .seg{margin-right:.7em}
-#cancion .nota{color:#8fb4ff;font-style:italic;font-size:.85em;margin:.2em 0}
-#cancion .rep{color:var(--tenue);font-size:.8em;margin-left:.6em}
-#cancion.vista-letra .ac{display:none}
-#cancion.vista-letra .pal{display:inline;white-space:normal}
-#cancion.vista-letra .seg{display:inline;white-space:normal}
-#cancion.vista-letra .esp{display:inline;white-space:normal}
-#cancion.vista-letra .tx{display:inline}
-#cancion.vista-letra{font-size:calc(var(--tam) * 1.25 * var(--ajuste, 1))}
-#cancion.vista-estructura .estructura{list-style:none;padding:0;margin:0}
-#cancion.vista-estructura .estructura li{padding:.7em .6em;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;gap:1em}
-#cancion.vista-estructura .estructura li.actual{background:#1a1204;color:var(--acorde);font-weight:700}
-#cancion.vista-estructura .estructura .acs{color:var(--acorde);font-weight:700;font-size:.9em;text-align:right}
+.lienzo .linea{margin:.15em 0;white-space:normal}
+.lienzo .pal{display:inline-block;white-space:nowrap;vertical-align:bottom}
+.lienzo .esp{display:inline-block;white-space:pre;vertical-align:bottom}
+.lienzo .seg{display:inline-block;vertical-align:bottom;white-space:pre}
+.lienzo .ac{display:block;color:var(--acorde);font-weight:800;font-size:.9em;line-height:1.1;min-height:1.1em}
+.lienzo .tx{display:block}
+.lienzo .seg.cola .ac,.lienzo .seg.antes-ac .ac{padding-right:.4em} /* acordes seguidos (vo[Gm]z[G7], voz[Gm][G7]) no se pegan */
+.lienzo .linea.solo-acordes .ac{font-size:1em}
+.lienzo .linea.solo-acordes .tx{display:none}
+.lienzo .linea.solo-acordes .seg{margin-right:.7em}
+.lienzo .nota{color:#8fb4ff;font-style:italic;font-size:.85em;margin:.2em 0}
+.lienzo .rep{color:var(--tenue);font-size:.8em;margin-left:.6em}
+.lienzo.vista-letra .ac{display:none}
+.lienzo.vista-letra .pal{display:inline;white-space:normal}
+.lienzo.vista-letra .seg{display:inline;white-space:normal}
+.lienzo.vista-letra .esp{display:inline;white-space:normal}
+.lienzo.vista-letra .tx{display:inline}
+.lienzo.vista-letra{font-size:calc(var(--tam) * 1.25 * var(--ajuste, 1))}
+.lienzo.vista-estructura .estructura{list-style:none;padding:0;margin:0}
+.lienzo.vista-estructura .estructura li{padding:.7em .6em;border-bottom:1px solid var(--borde);display:flex;justify-content:space-between;gap:1em}
+.lienzo.vista-estructura .estructura li.actual{background:#1a1204;color:var(--acorde);font-weight:700}
+.lienzo.vista-estructura .estructura .acs{color:var(--acorde);font-weight:700;font-size:.9em;text-align:right}
 
 #nota-panel{position:fixed;left:.6rem;right:.6rem;bottom:calc(.8rem + env(safe-area-inset-bottom));background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:.8rem;z-index:20}
 .nota-cab{font-size:.8rem;color:var(--tenue);margin-bottom:.4rem}
@@ -123,9 +126,9 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 /* cuál sigue */
 .sigue-cab{color:#8fb4ff;font-size:.9rem;margin-top:.2rem}
 .sigue-cab:empty{display:none}
-#cancion .sigue-card{margin:2rem 0 1rem;padding:1rem;border:1px dashed var(--borde);border-radius:14px;text-align:center;color:var(--tenue);font-size:.9em}
-#cancion .sigue-card b{display:block;color:var(--texto);font-size:1.15em;margin:.3em 0 .6em}
-#cancion .sigue-card button{font-size:1em;padding:.7rem 1.2rem;background:var(--azul);border-color:var(--azul)}
+.lienzo .sigue-card{margin:2rem 0 1rem;padding:1rem;border:1px dashed var(--borde);border-radius:14px;text-align:center;color:var(--tenue);font-size:.9em}
+.lienzo .sigue-card b{display:block;color:var(--texto);font-size:1.15em;margin:.3em 0 .6em}
+.lienzo .sigue-card button{font-size:1em;padding:.7rem 1.2rem;background:var(--azul);border-color:var(--azul)}
 
 /* editor de estructura */
 .ed-lineas{list-style:none;margin:0;padding:0;border:1px solid var(--borde);border-radius:12px;overflow:hidden;font-size:.95rem}
@@ -168,10 +171,10 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 .ed-texto .ed-acordes button{padding:.15rem .45rem;font-size:.8rem}
 
 /* "estamos aquí": marca temporal (5 s) que pone quien controla el vivo manteniendo presionada una palabra */
-#cancion{touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-#cancion .pal.marcada{background:var(--acorde);color:#000;border-radius:6px;box-shadow:0 0 0 4px var(--acorde);animation:latido 1s ease-in-out infinite}
-#cancion .pal.marcada .ac{color:#000}
-#cancion .linea.marcada{background:#2b1d05;border-radius:8px;box-shadow:0 0 0 6px #2b1d05}
+.lienzo{touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.lienzo .pal.marcada{background:var(--acorde);color:#000;border-radius:6px;box-shadow:0 0 0 4px var(--acorde);animation:latido 1s ease-in-out infinite}
+.lienzo .pal.marcada .ac{color:#000}
+.lienzo .linea.marcada{background:#2b1d05;border-radius:8px;box-shadow:0 0 0 6px #2b1d05}
 @keyframes latido{0%,100%{box-shadow:0 0 0 4px var(--acorde)}50%{box-shadow:0 0 0 9px rgba(245,158,11,.35)}}
 
 /* editor de acordes */
@@ -222,6 +225,10 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #edA-cancion .menu-bloque button{font-size:.9rem;padding:.45rem .7rem}
 #edA-cancion .cortar-linea{display:inline-block;vertical-align:bottom;margin-left:.3rem;padding:0 .45rem;font-size:.85rem;line-height:1.5;color:var(--tenue);background:#161616;border-color:#2a2a2a;border-radius:8px}
 #edA-cancion .sin-usar{margin:1rem 0 .4rem}
+#edA-barra.editando{position:static}
+#edA-barra .edA-fila{margin:0}
+#edA-barra .edA-fila .mini{flex:0 0 auto;min-width:2.4rem;font-weight:800}
+#edA-barra #edA-ayuda{margin-bottom:.5rem}
 #edA-cancion .bloque:not(.editando){cursor:text}
 #edA-cancion .bloque.editando{border-color:var(--acorde);background:#0f0d08}
 #edA-cancion .ed-pre{font-family:ui-monospace,Menlo,Monaco,"Courier New",monospace;font-size:1rem;line-height:1.35;white-space:pre;overflow-x:auto;outline:none;padding:.3rem .2rem;min-height:2.7em;-webkit-user-select:text;user-select:text}
@@ -230,6 +237,7 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #edA-cancion .ed-pre .ln.nota{font-family:-apple-system,system-ui,sans-serif;font-size:.9em;color:var(--tenue);font-style:italic;white-space:normal;padding:.15em .4em;margin:.15em 0;border-left:3px solid var(--borde);user-select:none;-webkit-user-select:none}
 #edA-cancion .edicion-acciones{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.5rem}
 #edA-cancion .edicion-acciones .ayuda{flex:1;font-size:.8rem}
+#edA-cancion .edicion-acciones .mini{flex:0 0 auto;min-width:2.6rem;font-size:1.1rem;padding:.4rem .6rem}
 #edA-cancion .nota[data-l]{cursor:context-menu}
 .nota-caja{margin:.4rem 0;padding:.5rem;background:var(--panel);border:1px solid var(--acorde);border-radius:10px}
 .nota-caja textarea{width:100%;box-sizing:border-box;font-size:1rem;padding:.5rem;background:#111;color:var(--texto);border:1px solid var(--borde);border-radius:8px;margin-bottom:.4rem}
@@ -246,7 +254,7 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 #ed-editar-sec{border-color:#8fb4ff}
 #ed-editar-sec textarea{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:1rem;background:#000;color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:.5rem}
 /* marca "estamos aquí" de una sección completa (desde la vista Estructura): un solo color, sin latido */
-#cancion .seccion.marcada-sec{background:#3a2806;border-radius:10px;box-shadow:0 0 0 8px #3a2806}
-#cancion.vista-estructura .estructura li.marcada-sec{background:var(--acorde);color:#000}
-#cancion.vista-estructura .estructura li.marcada-sec .acs,#cancion.vista-estructura .estructura li.marcada-sec .nota{color:#000}
+.lienzo .seccion.marcada-sec{background:#3a2806;border-radius:10px;box-shadow:0 0 0 8px #3a2806}
+.lienzo.vista-estructura .estructura li.marcada-sec{background:var(--acorde);color:#000}
+.lienzo.vista-estructura .estructura li.marcada-sec .acs,.lienzo.vista-estructura .estructura li.marcada-sec .nota{color:#000}
 #ed-mix-lista select.tono-mix{font-size:.85rem;padding:.35rem .4rem;max-width:11rem}

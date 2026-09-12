@@ -88,6 +88,7 @@ function aplicarEstado(e) {
   if (!Array.isArray(e.historial)) e.historial = [];
   $('#n-siguiente').textContent = e.siguiente.length || '';
   if (mostrando.id && transpBanda(mostrando.id) !== tonoAntes) mostrando.pintadoId = null; // cambió el tono de la banda: repintar
+  if (previa.id && $('#vista-previa').classList.contains('activa')) pintarPrevia();
   if (e.marca && e.marca.por !== clienteId && e.marca.t !== ultimaMarcaT && mostrando.id === e.vivo.cancion) { ultimaMarcaT = e.marca.t; setTimeout(() => mostrarMarca(e.marca), 50); }
   if (modo !== 'libre') {
     modo = puedeMover() ? 'lider' : 'siguiendo';
@@ -354,7 +355,31 @@ function irASeccion(i) {
   if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0, paso: 'seccion' }); else { modo = 'libre'; actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
 }
-function verLibre(id) { modo = 'libre'; actualizarControles(); irA('vivo'); mostrar(id, 0); }
+// ---------- previa: ver una canción sin tocar el vivo (reemplaza al antiguo "Ver" en navegación libre) ----------
+const previa = { id: null, cancion: null, expandidas: null };
+async function verLibre(id) { // el nombre se conserva por los botones "Ver" existentes
+  try {
+    const cho = await obtenerCho(id); previa.id = id; previa.cancion = parsear(cho); previa.expandidas = await expandirConPartes(previa.cancion);
+  } catch (e) { aviso('no se pudo abrir: ' + e.message); return; }
+  prefs.previaId = id; guardar('prefs', prefs); irA('previa'); pintarPrevia(); window.scrollTo({ top: 0 });
+}
+function pintarPrevia() {
+  const c = previa.cancion; const art = $('#cancion-previa');
+  if (!c) { $('#previa-titulo').textContent = 'Nada en vista previa'; $('#previa-sub').textContent = 'Toca “Ver” en Canciones, en la cola o en un setlist.'; $('#previa-acciones').hidden = true; art.innerHTML = ''; return; }
+  const m = c.meta, id = previa.id, transp = transpBanda(id), cejilla = cejillaPersonal(id);
+  $('#previa-titulo').textContent = m.titulo || titulo(id);
+  const tonoBanda = m.tono ? tonoTranspuesto(m.tono, transp) : '';
+  $('#previa-sub').textContent = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${m.tono})` : '') : 'tono sin fijar', cejilla ? `cejilla ${cejilla}` : '', 'vista previa: no cambia el vivo'].filter(Boolean).join(' · ');
+  $('#previa-acciones').hidden = false; $('#previa-editar').hidden = rol !== 'director'; $('#previa-vivo').hidden = !puedeMover(); $('#previa-cola').hidden = !puedeCola();
+  art.className = 'lienzo vista-' + perfil.vista;
+  art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: -1, secciones: previa.expandidas });
+  document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
+}
+$('#previa-editar').onclick = () => { if (previa.id) abrirEditor(previa.id); };
+$('#previa-vivo').onclick = () => { if (previa.id) { enviar({ tipo: 'vivo', cancion: previa.id }); irA('vivo'); } };
+$('#previa-cola').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: previa.id }); aviso('agregada a Siguiente'); } };
+$('#previa-tam-menos').onclick = () => { prefs.tam = Math.max(0.8, +(prefs.tam - 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
+$('#previa-tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
 $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
@@ -462,6 +487,7 @@ $('#nota-guardar').onclick = async () => { try { await api(`/api/notas/${encodeU
 async function cancionCambiada(id) {
   cacheCho.delete(id);
   try { indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca(); } catch {}
+  if (previa.id === id || (previa.cancion && previa.cancion.secciones.some(s => s.parte && s.parte.id === id))) { try { previa.cancion = parsear(await obtenerCho(previa.id)); previa.expandidas = await expandirConPartes(previa.cancion); if ($('#vista-previa').classList.contains('activa')) pintarPrevia(); } catch {} }
   if (mostrando.id === id || (mostrando.cancion && mostrando.cancion.secciones.some(s => s.parte && s.parte.id === id))) {
     const y = window.scrollY; mostrando.expandidas = null; mostrando.pintadoId = null;
     await mostrar(mostrando.id, mostrando.seccion, { frac: mostrando.frac, desplazar: false });
@@ -804,7 +830,7 @@ function renderEditorAcordes() {
     const titulo = b.suelto ? 'sin sección' : (b.nombre || 'sección sin nombre') + (b.vez > 1 ? ` · ${b.vez}ª vez` : '');
     const editando = edA.editando && edA.editando.j === j;
     html += `<div class="bloque ${editando ? 'editando' : ''}" data-j="${j}" title="${editando ? '' : 'Toca para editar esta sección como texto'}"><div class="bloque-cab">${b.suelto ? '' : `<span class="agarre agarre-bloque" title="Arrastra para mover esta sección">≡</span>`}<div class="nombre">${esc(titulo)}</div>${b.suelto ? '' : `<button class="mas-bloque" data-j="${j}" title="Opciones de esta sección">⋯</button>`}</div>`;
-    if (editando) html += `<div class="edicion"><div class="ed-pre" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off">${htmlModelo(edA.editando.modelo)}</div><div class="edicion-acciones"><span class="ayuda">Acordes arriba, letra abajo; muévelos con espacios o arrastrándolos. Clic derecho o pulsación larga: nota.</span><button class="ed-listo primario">✓ Listo</button><button class="ed-cancelar">Cancelar</button></div></div>`;
+    if (editando) html += `<div class="edicion"><div class="ed-pre" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off">${htmlModelo(edA.editando.modelo)}</div><div class="edicion-acciones"><button class="ed-deshacer mini" title="Deshacer (⌘Z)">↶</button><button class="ed-rehacer mini" title="Rehacer (⇧⌘Z)">↷</button><span class="ayuda">Acordes arriba, letra abajo; muévelos con espacios o arrastrándolos.</span><button class="ed-listo primario">✓ Listo</button><button class="ed-cancelar">Cancelar</button></div></div>`;
     else if (!b.sec) html += `<div class="nota">esta sección está en el arreglo pero no existe en la canción</div>`;
     else { const contenido = b.sec.lineas.filter(l => L[l].trim() && !RE_NOTA.test(L[l])); for (const l of b.sec.lineas) { const k = contenido.indexOf(l); html += lineaHtml(l, k >= 0 && k < contenido.length - 1 ? contenido[k + 1] : null); } }
     html += '</div>';
@@ -843,7 +869,8 @@ function renderEditorAcordes() {
   if (edA.destino) { const pl = art.querySelector(`.pal[data-l="${edA.destino.l}"][data-ini="${edA.destino.ini}"]`); if (pl) pl.classList.add('destino'); }
   $('#edA-acorde-sel').hidden = !edA.sel || !!edA.destino;
   $('#edA-letras').hidden = !edA.destino && !edA.lineaNueva;
-  $('#edA-ayuda').hidden = !!(edA.sel || edA.destino || edA.lineaNueva);
+  $('#edA-ayuda').hidden = !edA.ayudaAbierta; // la ayuda vive tras el botón ? (Cristhian, 11-sep: el cuadro estorbaba al editar en el iPhone)
+  $('#edA-barra').classList.toggle('editando', !!edA.editando); // mientras se edita un bloque, la barra no va fija arriba
   $('#edA-deshacer').disabled = !edA.historial.length;
   const estado = (editor.cho.match(/^\{\s*estado\s*:\s*(.*?)\s*\}/mi) || [])[1] || '';
   $('#edA-estado').textContent = estado === 'corregida' ? '✓ Corregida (volver a "importada")' : 'Marcar como corregida';
@@ -944,10 +971,12 @@ function prepararPre(pre) {
     pre.innerHTML = htmlModelo(ed.modelo); if (caret) ponerCaret(pre, caret.linea, caret.col);
   });
   // deshacer / rehacer propios (el recoloreado en cada tecla anula el del navegador): ⌘Z / Ctrl+Z, ⇧⌘Z / Ctrl+Y
+  ed.deshacer = () => { const f = ed.pasado.pop(); if (f) { ed.futuro.push(foto()); restaurar(f); } };
+  ed.rehacer = () => { const f = ed.futuro.pop(); if (f) { ed.pasado.push(foto()); restaurar(f); } };
   pre.addEventListener('keydown', ev => {
     const cmd = ev.metaKey || ev.ctrlKey;
-    if (cmd && ev.key.toLowerCase() === 'z' && !ev.shiftKey) { ev.preventDefault(); const f = ed.pasado.pop(); if (f) { ed.futuro.push(foto()); restaurar(f); } return; }
-    if (cmd && ((ev.key.toLowerCase() === 'z' && ev.shiftKey) || ev.key.toLowerCase() === 'y')) { ev.preventDefault(); const f = ed.futuro.pop(); if (f) { ed.pasado.push(foto()); restaurar(f); } return; }
+    if (cmd && ev.key.toLowerCase() === 'z' && !ev.shiftKey) { ev.preventDefault(); ed.deshacer(); return; }
+    if (cmd && ((ev.key.toLowerCase() === 'z' && ev.shiftKey) || ev.key.toLowerCase() === 'y')) { ev.preventDefault(); ed.rehacer(); return; }
     if (ev.key === 'Escape') { ev.preventDefault(); cancelarBloque(); }
     if (ev.key === 'Tab') { ev.preventDefault(); document.execCommand('insertText', false, '    '); }
   });
@@ -1113,6 +1142,8 @@ function mostrarAgregarLinea(l, enLaMisma) {
 }
 $('#edA-cancion').addEventListener('click', e => {
   if (notaLargaAbierta) { notaLargaAbierta = false; return; }
+  if (e.target.closest('.ed-deshacer')) { if (edA.editando && edA.editando.deshacer) edA.editando.deshacer(); return; }
+  if (e.target.closest('.ed-rehacer')) { if (edA.editando && edA.editando.rehacer) edA.editando.rehacer(); return; }
   if (e.target.closest('.ed-listo')) { guardarBloque(); return; }
   if (e.target.closest('.ed-cancelar')) { cancelarBloque(); return; }
   if (e.target.closest('.edicion') || e.target.closest('.nota-caja') || e.target.closest('.menu-bloque')) return;
@@ -1137,6 +1168,7 @@ document.addEventListener('keydown', ev => {
   else if (ev.key === 'Escape' && (edA.sel || edA.destino || edA.lineaNueva)) { ev.preventDefault(); $(edA.destino || edA.lineaNueva ? '#edA-letras-cancelar' : '#edA-cancelar').click(); }
 });
 $('#edA-cancelar').onclick = () => { edA.sel = null; edA.destino = null; edA.duplicar = false; renderEditorAcordes(); };
+$('#edA-ayuda-btn').onclick = () => { edA.ayudaAbierta = !edA.ayudaAbierta; $('#edA-ayuda').hidden = !edA.ayudaAbierta; };
 $('#edA-duplicar').onclick = () => { if (!edA.sel) return; edA.duplicar = !edA.duplicar; renderEditorAcordes(); if (edA.duplicar) aviso('toca la palabra donde va la copia'); };
 $('#edA-letras-cancelar').onclick = () => { edA.destino = null; edA.lineaNueva = null; posElegida = null; $('#edA-agregar-txt').placeholder = 'Acorde a agregar (Am, G7…)'; renderEditorAcordes(); };
 $('#edA-deshacer').onclick = async () => { const prev = edA.historial.pop(); if (prev === undefined) return; editor.guardando = true; try { await guardarEditor(prev); } finally { editor.guardando = false; } edA.sel = null; edA.destino = null; renderEditorAcordes(); };
@@ -1486,4 +1518,5 @@ cargarIndice().then(conectar);
 // al cargar: sin perfil → "Yo"; si no, la pestaña (y la canción del editor) donde estaba este dispositivo
 if (!perfil.nombre) irA('ajustes');
 else if (prefs.vista === 'editor' && prefs.editorId) { editorPendiente = prefs.editorId; irA('biblioteca'); } // el editor se abre cuando el servidor confirme el rol (bienvenida)
+else if (prefs.vista === 'previa' && prefs.previaId) { cargarIndice().then(() => verLibre(prefs.previaId)); }
 else if (prefs.vista && prefs.vista !== 'editor' && $(`#tabs button[data-vista="${prefs.vista}"]`)) irA(prefs.vista);
