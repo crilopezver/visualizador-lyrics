@@ -132,6 +132,7 @@ function actualizarControles() {
   $('#ctl-tono').classList.toggle('solo-lectura', rol !== 'director');
   $('#btn-tono-orig').hidden = rol !== 'director' || !mostrando.id;
   $('#btn-cantante').hidden = rol !== 'director';
+  if (rolSetlists !== null && rolSetlists !== rol && $('#vista-setlists').classList.contains('activa') && $('#setlist-editor').hidden) cargarSetlists();
 }
 function vaciarVivo() {
   mostrando.id = null; mostrando.cancion = null;
@@ -383,7 +384,7 @@ function pintarPrevia() {
   $('#previa-titulo').textContent = m.titulo || titulo(id);
   const tonoBanda = m.tono ? tonoTranspuesto(m.tono, transp) : '';
   $('#previa-sub').textContent = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${m.tono})` : '') : 'tono sin fijar', cejilla ? `cejilla ${cejilla}` : '', 'vista previa: no cambia el vivo'].filter(Boolean).join(' · ');
-  $('#previa-acciones').hidden = false; $('#previa-editar').hidden = rol !== 'director'; $('#previa-vivo').hidden = !puedeMover(); $('#previa-cola').hidden = !puedeCola();
+  $('#previa-acciones').hidden = false; $('#previa-editar').hidden = rol !== 'director'; $('#previa-vivo').hidden = !puedeMover(); $('#previa-cola').hidden = !puedeCola(); $('#previa-siguiente').hidden = !puedeCola();
   art.className = 'lienzo vista-' + perfil.vista;
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: -1, secciones: previa.expandidas });
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
@@ -391,6 +392,7 @@ function pintarPrevia() {
 $('#previa-editar').onclick = () => { if (previa.id) abrirEditor(previa.id); };
 $('#previa-vivo').onclick = () => { if (previa.id) { enviar({ tipo: 'vivo', cancion: previa.id }); irA('vivo'); } };
 $('#previa-cola').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: previa.id }); aviso('agregada a Siguiente'); } };
+$('#previa-siguiente').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: previa.id, donde: 'inicio' }); aviso('va como siguiente'); } };
 $('#previa-tam-menos').onclick = () => { prefs.tam = Math.max(0.8, +(prefs.tam - 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
 $('#previa-tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
 $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
@@ -532,10 +534,39 @@ function renderSiguiente() {
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(id)));
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: id }); enviar({ tipo: 'siguiente', accion: 'quitar', indice: i }); irA('vivo'); }, 'primario'));
-    if (puedeCola()) { if (i > 0) acc.append(boton('↑', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: i - 1 }))); acc.append(boton('✕', () => enviar({ tipo: 'siguiente', accion: 'quitar', indice: i }))); }
+    if (puedeCola()) {
+      // ⤒ la pone primera ("adelantar", Cristhian, 11-sep); ↑ un puesto; ≡ arrastre libre. Todo va al servidor como "mover".
+      if (i > 0) acc.append(boton('⤒', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: 0 })));
+      if (i > 0) acc.append(boton('↑', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: i - 1 })));
+      acc.append(boton('✕', () => enviar({ tipo: 'siguiente', accion: 'quitar', indice: i })));
+      const asa = document.createElement('span'); asa.className = 'agarre'; asa.title = 'Arrastra para mover'; asa.textContent = '≡'; li.prepend(asa);
+      arrastrable(li, asa, ol, a => { if (a !== i && a >= 0) enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a }); else renderSiguiente(); });
+    }
     ol.append(li);
   });
   renderHistorial();
+}
+// arrastre genérico de un <li> dentro de su lista desde un asa (eventos pointer; mover/soltar en el documento, como en el arreglo, fila 137)
+function arrastrable(li, asa, ol, alSoltar) {
+  asa.addEventListener('pointerdown', e => {
+    if (e.button && e.button !== 0) return;
+    e.preventDefault(); li.classList.add('arrastrando');
+    try { asa.setPointerCapture(e.pointerId); } catch {}
+    const mover = ev => {
+      if (ev.pointerId !== e.pointerId) return; ev.preventDefault();
+      const bajo = document.elementFromPoint(ev.clientX, ev.clientY); const otro = bajo && bajo.closest('li');
+      if (!otro || otro === li || otro.parentElement !== ol) return;
+      const r = otro.getBoundingClientRect();
+      if (ev.clientY < r.top + r.height / 2) otro.before(li); else otro.after(li);
+    };
+    const soltar = ev => {
+      if (ev && ev.pointerId !== e.pointerId) return;
+      document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar);
+      li.classList.remove('arrastrando'); alSoltar([...ol.children].indexOf(li));
+    };
+    document.addEventListener('pointermove', mover, { passive: false });
+    document.addEventListener('pointerup', soltar); document.addEventListener('pointercancel', soltar);
+  });
 }
 // Ya tocadas: la más reciente primero. Ver / ▶ Vivo / + Cola; el director puede limpiarla (p. ej. al empezar otro toque).
 function renderHistorial() {
@@ -549,6 +580,7 @@ function renderHistorial() {
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(id)));
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: id }); irA('vivo'); }, 'primario'));
+    if (puedeCola()) acc.append(Object.assign(boton('⤒', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: id, donde: 'inicio' }); aviso('va como siguiente'); }), { title: 'Como siguiente (después de la actual)' }));
     if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: id }); aviso('agregada a la cola'); }));
     ol.append(li);
   });
@@ -586,6 +618,7 @@ function renderBiblioteca() {
       if (!confirm(`¿Borrar “${c.titulo}”? Sale de la biblioteca, de la cola y del historial. Queda una copia en datos/papelera.`)) return;
       try { await api(`/api/canciones/${c.id}`, { method: 'DELETE' }); cacheCho.delete(c.id); await cargarIndice(); renderBiblioteca(); aviso('canción borrada'); } catch (e) { aviso('no se borró: ' + e.message); }
     }, 'peligro'));
+    if (puedeCola()) acc.append(Object.assign(boton('⤒', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id, donde: 'inicio' }); aviso('va como siguiente'); }), { title: 'Como siguiente (después de la actual)' })); // "reproducir a continuación" (Cristhian, 11-sep)
     if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id }); aviso('agregada a Siguiente'); }));
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: c.id }); irA('vivo'); }, 'primario'));
     ul.append(li);
@@ -600,15 +633,22 @@ async function cargarIndice() {
 }
 
 // ---------- setlists ----------
+let rolSetlists = null; // rol con el que se pintó la lista: si el servidor confirma otro (recarga cayendo en Setlists), se repinta
 async function cargarSetlists() {
-  const ul = $('#lista-setlists'); ul.innerHTML = '';
+  const ul = $('#lista-setlists'); ul.innerHTML = ''; ul.hidden = false; rolSetlists = rol;
+  $('#setlist-editor').hidden = true; $('#setlists-director').hidden = rol !== 'director';
   try {
     const lista = await api('/api/setlists');
-    if (!lista.length) ul.innerHTML = '<li class="vacio">No hay setlists. El director puede guardar la cola “Siguiente” como setlist.</li>';
+    if (!lista.length) ul.innerHTML = `<li class="vacio">No hay setlists.${rol === 'director' ? ' Crea uno con “+ Nuevo setlist”.' : ''}</li>`;
     for (const s of lista) {
       const li = document.createElement('li');
       li.innerHTML = `<div class="info"><div class="t">${esc(s.nombre)}</div><div class="s">${esc(s.fecha)} · ${s.n} canciones</div></div><div class="acc"></div>`;
-      li.querySelector('.acc').append(boton('Abrir', () => abrirSetlist(s.id)));
+      const acc = li.querySelector('.acc');
+      acc.append(boton('Abrir', () => abrirSetlist(s.id)));
+      if (rol === 'director') {
+        acc.append(boton('✎', () => abrirEditorSetlist(s.id)));
+        acc.append(boton('🗑', () => borrarSetlist(s.id, s.nombre), 'peligro'));
+      }
       ul.append(li);
     }
   } catch (e) { ul.innerHTML = `<li class="vacio">No se pudieron cargar (${esc(e.message)})</li>`; }
@@ -618,12 +658,80 @@ async function abrirSetlist(id) {
     setlistAbierto = await api(`/api/setlists/${id}`);
     $('#setlist-nombre').textContent = `${setlistAbierto.nombre} · ${setlistAbierto.fecha}`;
     const ol = $('#setlist-canciones'); ol.innerHTML = '';
-    setlistAbierto.canciones.forEach(cid => { const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(titulo(cid))}</div><div class="s">${esc(artista(cid))}</div></div><div class="acc"></div>`; li.querySelector('.acc').append(boton('Ver', () => verLibre(cid))); ol.append(li); });
-    $('#setlist-cargar').hidden = !puedeCola();
+    setlistAbierto.canciones.forEach(cid => {
+      const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(titulo(cid))}</div><div class="s">${esc(artista(cid))}</div></div><div class="acc"></div>`;
+      const acc = li.querySelector('.acc'); acc.append(boton('Ver', () => verLibre(cid)));
+      if (puedeCola()) { acc.append(Object.assign(boton('⤒', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: cid, donde: 'inicio' }); aviso('va como siguiente'); }), { title: 'Como siguiente (después de la actual)' })); acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: cid }); aviso('agregada a Siguiente'); })); }
+      ol.append(li);
+    });
+    $('#setlist-cargar').hidden = !puedeCola(); $('#setlist-editar').hidden = rol !== 'director';
     $('#setlist-detalle').hidden = false;
   } catch (e) { aviso('error: ' + e.message); }
 }
 $('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
+$('#setlist-editar').onclick = () => { if (setlistAbierto) abrirEditorSetlist(setlistAbierto.id); };
+
+// ---------- editor de setlists (director) ----------
+// Cristhian, 11-sep: la app es un reproductor; los setlists son sus playlists y se crean, editan y borran aparte de la cola,
+// igual que los mixes. Cada cambio se guarda solo (PUT /api/setlists/<id>); "Borrar" manda el archivo a datos/papelera.
+const sl = { id: null, datos: null };
+async function nuevoSetlist() {
+  const nombre = prompt('Nombre del setlist (ej. “Sábado Pueblo Café”):'); if (!nombre || !nombre.trim()) return;
+  const fecha = new Date(); const hoy = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+  try { const { id } = await api('/api/setlists', { method: 'POST', body: JSON.stringify({ nombre: nombre.trim(), fecha: hoy, canciones: [] }) }); await abrirEditorSetlist(id); }
+  catch (e) { aviso('no se pudo crear: ' + e.message); }
+}
+async function abrirEditorSetlist(id) {
+  try { sl.datos = await api(`/api/setlists/${id}`); sl.id = id; } catch (e) { return aviso('error: ' + e.message); }
+  $('#lista-setlists').hidden = true; $('#setlists-director').hidden = true; $('#setlist-detalle').hidden = true; $('#setlist-editor').hidden = false;
+  $('#sl-nombre').value = sl.datos.nombre || ''; $('#sl-fecha').value = sl.datos.fecha || ''; $('#sl-buscar').value = '';
+  renderEditorSetlist();
+}
+async function guardarSetlistEd() {
+  try { await api(`/api/setlists/${sl.id}`, { method: 'PUT', body: JSON.stringify({ nombre: sl.datos.nombre, fecha: sl.datos.fecha, canciones: sl.datos.canciones }) }); }
+  catch (e) { aviso('no se guardó: ' + e.message); }
+}
+function renderEditorSetlist() {
+  const c = sl.datos.canciones; const ol = $('#sl-lista'); ol.innerHTML = '';
+  if (!c.length) ol.innerHTML = '<li class="vacio">El setlist está vacío: agrega canciones abajo.</li>';
+  c.forEach((cid, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="agarre" title="Arrastra para mover">≡</span><div class="info"><div class="t">${i + 1}. ${esc(titulo(cid))}</div><div class="s">${esc(artista(cid))}</div></div><div class="acc"></div>`;
+    const acc = li.querySelector('.acc');
+    if (i > 0) acc.append(boton('↑', () => { [c[i - 1], c[i]] = [c[i], c[i - 1]]; guardarSetlistEd(); renderEditorSetlist(); }));
+    if (i < c.length - 1) acc.append(boton('↓', () => { [c[i + 1], c[i]] = [c[i], c[i + 1]]; guardarSetlistEd(); renderEditorSetlist(); }));
+    acc.append(boton('✕', () => { c.splice(i, 1); guardarSetlistEd(); renderEditorSetlist(); }));
+    arrastrable(li, li.querySelector('.agarre'), ol, a => { if (a >= 0 && a !== i) { const [x] = c.splice(i, 1); c.splice(a, 0, x); guardarSetlistEd(); } renderEditorSetlist(); });
+    ol.append(li);
+  });
+  const buscar = $('#sl-buscar'), res = $('#sl-resultados');
+  const pintarRes = () => {
+    const q = norm(buscar.value.trim()); res.innerHTML = '';
+    if (!q) return;
+    const lista = indice.filter(x => norm(x.titulo).includes(q) || norm(x.artista).includes(q)).slice(0, 12);
+    if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
+    for (const x of lista) {
+      const li = document.createElement('li');
+      li.innerHTML = `<div class="info"><div class="t">${x.tipo === 'mix' ? '🎛 ' : x.tipo === 'bloque' ? '🗒 ' : ''}${esc(x.titulo)}${c.includes(x.id) ? '<span class="n">ya está en el setlist</span>' : ''}</div><div class="s">${esc(x.artista || '')}</div></div><div class="acc"></div>`;
+      li.querySelector('.acc').append(boton('+ Agregar', () => { c.push(x.id); buscar.value = ''; guardarSetlistEd(); renderEditorSetlist(); }, 'primario'));
+      res.append(li);
+    }
+  };
+  buscar.oninput = pintarRes; pintarRes();
+}
+async function borrarSetlist(id, nombre) {
+  if (!confirm(`¿Borrar el setlist “${nombre}”? Queda una copia en datos/papelera.`)) return false;
+  try { await api(`/api/setlists/${id}`, { method: 'DELETE' }); aviso('setlist borrado'); cargarSetlists(); return true; }
+  catch (e) { aviso('no se borró: ' + e.message); return false; }
+}
+$('#btn-nuevo-setlist').onclick = nuevoSetlist;
+$('#sl-nombre').onchange = ev => { sl.datos.nombre = ev.target.value.trim() || sl.datos.nombre; ev.target.value = sl.datos.nombre; guardarSetlistEd(); };
+$('#sl-fecha').onchange = ev => { sl.datos.fecha = ev.target.value; guardarSetlistEd(); };
+$('#sl-listo').onclick = async () => {
+  if (sl.datos && !sl.datos.canciones.length && confirm('El setlist está vacío. ¿Lo borro?')) { await borrarSetlist(sl.id, sl.datos.nombre); return; }
+  aviso('setlist guardado'); cargarSetlists();
+};
+$('#sl-borrar').onclick = () => { if (sl.id) borrarSetlist(sl.id, sl.datos.nombre); };
 $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: setlistAbierto.canciones }); irA('siguiente'); };
 
 // ---------- perfil / ajustes ----------

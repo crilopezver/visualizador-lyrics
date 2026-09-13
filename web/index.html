@@ -67,6 +67,7 @@
       <div class="fila" id="previa-acciones" hidden>
         <button id="previa-editar" class="primario" hidden>✎ Editar</button>
         <button id="previa-vivo" hidden>▶ Vivo</button>
+        <button id="previa-siguiente" hidden>⤒ Siguiente</button>
         <button id="previa-cola" hidden>+ Cola</button>
         <label class="ctl">Letra <button id="previa-tam-menos">A−</button><button id="previa-tam-mas">A+</button></label>
       </div>
@@ -100,15 +101,26 @@
 
   <!-- SETLISTS -->
   <section id="vista-setlists" class="vista">
-    <h2>Setlists</h2>
+    <h2>Setlists <small>playlists de la banda: se crean y editan aparte de la cola</small></h2>
+    <div id="setlists-director" class="fila" hidden><button id="btn-nuevo-setlist" class="primario">+ Nuevo setlist</button></div>
     <ul id="lista-setlists" class="lista"></ul>
     <div id="setlist-detalle" hidden>
       <h3 id="setlist-nombre"></h3>
       <ol id="setlist-canciones" class="lista"></ol>
       <div class="fila">
         <button id="setlist-cargar" class="primario">▶ Cargar a “Siguiente”</button>
+        <button id="setlist-editar" hidden>✎ Editar</button>
         <button id="setlist-cerrar">Cerrar</button>
       </div>
+    </div>
+    <!-- editor de setlist (director): como el editor de mix, cada cambio se guarda solo (Cristhian, 11-sep) -->
+    <div id="setlist-editor" hidden>
+      <div class="fila"><input id="sl-nombre" type="text" placeholder="Nombre del setlist" autocomplete="off" style="flex:1;min-width:12rem"><input id="sl-fecha" type="date"></div>
+      <ol id="sl-lista" class="lista"></ol>
+      <h3>Agregar canciones</h3>
+      <input id="sl-buscar" type="search" placeholder="Buscar por título o artista…" autocomplete="off">
+      <ul id="sl-resultados" class="lista"></ul>
+      <div class="fila"><span class="ayuda" style="flex:1;align-self:center">Todo cambio se guarda solo. Arrastra ≡ para ordenar.</span><button id="sl-listo" class="primario">✓ Listo</button><button id="sl-borrar" class="peligro">🗑 Borrar setlist</button></div>
     </div>
   </section>
 

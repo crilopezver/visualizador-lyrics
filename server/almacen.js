@@ -80,6 +80,14 @@ export class Almacen {
     }).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   }
   leerSetlist(id) { return this.idValido(id) ? this.leerJson(path.join('setlists', id + '.json'), null) : null; }
+  // Borrar setlist: a datos/papelera/ como setlist_<id>_<sello>.json (Cristhian, 11-sep: crear, editar y borrar setlists desde la app)
+  eliminarSetlist(id) {
+    if (!this.idValido(id)) return false;
+    const ruta = path.join(this.raiz, 'setlists', id + '.json'); if (!fs.existsSync(ruta)) return false;
+    const papelera = path.join(this.raiz, 'papelera'); fs.mkdirSync(papelera, { recursive: true });
+    const sello = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    fs.renameSync(ruta, path.join(papelera, `setlist_${id}_${sello}.json`)); return true;
+  }
   guardarSetlist(id, setlist) {
     if (!this.idValido(id)) throw new Error('id inválido');
     this.guardarJson(path.join('setlists', id + '.json'), { nombre: setlist.nombre || id, fecha: setlist.fecha || '', canciones: setlist.canciones || [] });

@@ -54,7 +54,7 @@ export class Estado {
       case 'siguiente': {
         if (!this.puedeCola(rol)) return false;
         const { accion, cancion, indice, a } = msg;
-        if (accion === 'agregar' && cancion) this.siguiente.push(cancion);
+        if (accion === 'agregar' && cancion) { if (msg.donde === 'inicio') this.siguiente.unshift(cancion); else this.siguiente.push(cancion); } // donde: 'inicio' = como siguiente (Cristhian, 11-sep)
         else if (accion === 'quitar' && typeof indice === 'number') this.siguiente.splice(indice, 1);
         else if (accion === 'vaciar') this.siguiente = [];
         else if (accion === 'reemplazar' && Array.isArray(msg.canciones)) this.siguiente = msg.canciones.filter(Boolean);

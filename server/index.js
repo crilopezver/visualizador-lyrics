@@ -111,6 +111,7 @@ const servidor = http.createServer(async (req, res) => {
         if (req.method === 'GET' && !id) return json(res, 200, almacen.indiceSetlists());
         if (req.method === 'GET') { const s = almacen.leerSetlist(id); return s ? json(res, 200, { id, ...s }) : json(res, 404, { error: 'no existe' }); }
         if (rol !== 'director') return json(res, 403, { error: 'solo el director edita setlists' });
+        if (req.method === 'DELETE' && id) return almacen.eliminarSetlist(id) ? json(res, 200, { id, borrado: true }) : json(res, 404, { error: 'no existe' });
         const cuerpo = await leerCuerpo(req);
         const nuevoId = id || ((cuerpo.fecha || new Date().toISOString().slice(0, 10)) + '-' + String(cuerpo.nombre || 'setlist').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
         almacen.guardarSetlist(nuevoId, cuerpo); return json(res, 200, { id: nuevoId });
