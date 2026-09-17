@@ -18,7 +18,7 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(RAIZ_APP, 'package.json'), 
 const ARRANQUE = Date.now();
 // Huella de la app: cambia con cualquier cambio en los archivos del cliente. Se inyecta en sw.js para que cada despliegue
 // sea una caché nueva y completa (los celulares no mezclan versiones; Paper 10, hallazgo 1).
-const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'js/datos.js', 'js/estado-comun.js', 'js/nube.js', 'js/nube.config.js', 'js/vendor/supabase.js', 'manifest.webmanifest', 'icono.svg'];
+const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'js/datos.js', 'js/estado-comun.js', 'js/nube.js', 'js/nube.config.js', 'js/vendor/supabase.js', 'manifest.webmanifest', 'icono.svg', 'sw.js'];
 let huellaCache = { firma: '', valor: '' };
 function huellaApp() { // se recalcula sola cuando cambia algún archivo (por fecha y tamaño), sin relanzar el servidor
   const firma = ARCHIVOS_APP.map(f => { try { const st = fs.statSync(path.join(AQUI, '..', 'web', f)); return f + st.mtimeMs + st.size; } catch { return f; } }).join('|');
