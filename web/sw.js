@@ -19,7 +19,9 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname === '/sw.js' || url.pathname === '/mac' || url.pathname === '/mac.html') return; // datos y panel: solo en red
-  // app: desde la caché de esta versión (conjunto coherente); lo que no esté precargado, red y luego caché
-  e.respondWith(caches.match(e.request, { cacheName: CACHE_APP }).then(hit => hit || fetch(e.request).then(r => { if (r.ok) caches.open(CACHE_APP).then(c => c.put(e.request, r.clone())); return r; })
-    .catch(() => caches.match(e.request).then(r => r || new Response('sin red', { status: 503 })))));
+  // app: desde la caché de esta versión (conjunto coherente); lo que no esté precargado, red y luego caché.
+  // ignoreSearch: "/?banda=…" (enlace de instalación) es la misma página que "/"; si no, se mezclaría un index.html de la red con un app.js de la caché.
+  const clave = e.request.mode === 'navigate' ? new Request(url.origin + '/', { cache: 'no-cache' }) : e.request;
+  e.respondWith(caches.match(clave, { cacheName: CACHE_APP, ignoreSearch: true }).then(hit => hit || fetch(e.request).then(r => { if (r.ok) caches.open(CACHE_APP).then(c => c.put(clave, r.clone())); return r; })
+    .catch(() => caches.match(clave, { ignoreSearch: true }).then(r => r || new Response('sin red', { status: 503 })))));
 });
