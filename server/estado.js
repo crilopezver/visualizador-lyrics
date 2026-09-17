@@ -1,17 +1,21 @@
 // Estado en vivo compartido por toda la banda. Un solo control del vivo a la vez.
+// Las reglas viven en web/js/estado-comun.js, compartidas con el celular (que las aplica sobre su copia sin conexión).
+import { aplicarMensaje, puedeMoverVivo, puedeCola } from '../web/js/estado-comun.js';
+
 export class Estado {
   constructor(almacen) {
     this.almacen = almacen;
     const guardado = almacen.leerEstado();
     this.vivo = guardado?.vivo || { cancion: null, seccion: 0, frac: 0 };
     this.siguiente = guardado?.siguiente || [];
-    this.historial = guardado?.historial || []; // canciones ya tocadas en el vivo (la más reciente al final), como el historial de un reproductor
+    this.historial = guardado?.historial || []; // canciones ya tocadas en el vivo (la más reciente al final)
     this.controlCantante = guardado?.controlCantante ?? false;
     this.tonos = guardado?.tonos || {}; // tono de la banda por canción: semitonos respecto al original (decide el director)
+    this.propuestas = guardado?.propuestas || {}; // colas armadas sin conexión (cantante / director) pendientes de aprobación del director
     this.conectados = new Map(); // ws -> {nombre, rol, instrumento}
   }
   persistir() {
-    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, historial: this.historial, controlCantante: this.controlCantante, tonos: this.tonos });
+    this.almacen.guardarEstado({ vivo: this.vivo, siguiente: this.siguiente, historial: this.historial, controlCantante: this.controlCantante, tonos: this.tonos, propuestas: this.propuestas });
   }
   snapshot() {
     return {
@@ -20,6 +24,7 @@ export class Estado {
       historial: this.historial,
       controlCantante: this.controlCantante,
       tonos: this.tonos,
+      propuestas: this.propuestas,
       marca: this.marca && Date.now() - this.marca.t < 6000 ? this.marca : null,
       conectados: [...this.conectados.values()].map(c => ({ nombre: c.nombre, rol: c.rol, instrumento: c.instrumento })),
     };
@@ -32,69 +37,12 @@ export class Estado {
     const n2 = this.historial.length; this.historial = this.historial.filter(c => c !== id); if (this.historial.length !== n2) cambio = true;
     if (cambio) this.persistir(); return cambio;
   }
-  puedeMoverVivo(rol) { return rol === 'director' || (rol === 'cantante' && this.controlCantante); }
-  puedeCola(rol) { return rol === 'director' || rol === 'cantante'; }
-  // La canción que sale del vivo entra al historial (máximo 50). Se llama ANTES de cambiar this.vivo.cancion.
-  recordarVivo() { if (this.vivo.cancion) { this.historial.push(this.vivo.cancion); if (this.historial.length > 50) this.historial.shift(); } }
-  // Cada vez que entra una canción al vivo (aunque sea la misma repetida) sube este contador: los clientes lo usan para saber que es una carga nueva y volver al inicio.
-  ponerEnVivo(cancion, clienteId) { this.vivo = { cancion, seccion: 0, frac: 0, por: clienteId, carga: (this.vivo.carga || 0) + 1 }; }
-
+  puedeMoverVivo(rol) { return puedeMoverVivo(this, rol); }
+  puedeCola(rol) { return puedeCola(rol); }
   // Devuelve true si el estado cambió.
   aplicar(msg, rol, clienteId = null) {
-    switch (msg.tipo) {
-      case 'vivo': {
-        if (!this.puedeMoverVivo(rol)) return false;
-        this.vivo.por = clienteId; // quién movió: ese cliente ignora su propio eco
-        if (msg.cancion !== undefined) { this.recordarVivo(); this.ponerEnVivo(msg.cancion, clienteId); }
-        if (typeof msg.seccion === 'number' && msg.seccion >= 0) { this.vivo.seccion = Math.floor(msg.seccion); this.vivo.frac = 0; }
-        if (typeof msg.frac === 'number') this.vivo.frac = Math.max(0, Math.min(1, msg.frac));
-        this.vivo.paso = ['seccion', 'pagina', 'lineas'].includes(msg.paso) ? msg.paso : 'deslizar'; // cómo se movió quien controla (los demás ajustan la letra solo si fue por sección)
-        this.persistir(); return true;
-      }
-      case 'siguiente': {
-        if (!this.puedeCola(rol)) return false;
-        const { accion, cancion, indice, a } = msg;
-        if (accion === 'agregar' && cancion) { if (msg.donde === 'inicio') this.siguiente.unshift(cancion); else this.siguiente.push(cancion); } // donde: 'inicio' = como siguiente (Cristhian, 11-sep)
-        else if (accion === 'quitar' && typeof indice === 'number') this.siguiente.splice(indice, 1);
-        else if (accion === 'vaciar') this.siguiente = [];
-        else if (accion === 'reemplazar' && Array.isArray(msg.canciones)) this.siguiente = msg.canciones.filter(Boolean);
-        else if (accion === 'mover' && typeof indice === 'number' && typeof a === 'number') {
-          const [x] = this.siguiente.splice(indice, 1); if (x) this.siguiente.splice(a, 0, x);
-        } else if (accion === 'pasar') {
-          // la primera de la cola pasa al vivo (solo quien puede mover el vivo)
-          if (!this.puedeMoverVivo(rol) || !this.siguiente.length) return false;
-          this.recordarVivo();
-          this.ponerEnVivo(this.siguiente.shift(), clienteId);
-        } else if (accion === 'anterior') {
-          // vuelve a la última tocada (como "pista anterior" de un reproductor): la actual pasa al frente de la cola para poder retomarla con "siguiente canción"
-          if (!this.puedeMoverVivo(rol) || !this.historial.length) return false;
-          const previa = this.historial.pop();
-          if (this.vivo.cancion) this.siguiente.unshift(this.vivo.cancion);
-          this.ponerEnVivo(previa, clienteId);
-        } else if (accion === 'vaciar-historial') {
-          if (rol !== 'director') return false;
-          this.historial = [];
-        } else return false;
-        this.persistir(); return true;
-      }
-      case 'tono': {
-        // tono de la banda para una canción: solo el director. transp = semitonos (-11..11) respecto al tono original.
-        if (rol !== 'director' || typeof msg.cancion !== 'string') return false;
-        const t = Math.max(-11, Math.min(11, Math.round(Number(msg.transp) || 0)));
-        if (t === 0) delete this.tonos[msg.cancion]; else this.tonos[msg.cancion] = t;
-        this.persistir(); return true;
-      }
-      case 'marca': {
-        // "estamos aquí": señal temporal que puede mandar cualquier integrante; no se persiste, solo se difunde
-        if (typeof msg.seccion !== 'number') return false;
-        this.marca = { seccion: Number(msg.seccion) || 0, linea: Number(msg.linea) || 0, palabra: Number(msg.palabra) || 0, todo: !!msg.todo, por: clienteId, quien: String(msg.quien || '').slice(0, 40), t: Date.now() }; // todo: la sección completa (desde la vista Estructura)
-        return true;
-      }
-      case 'control': {
-        if (rol !== 'director') return false;
-        this.controlCantante = !!msg.cantante; this.persistir(); return true;
-      }
-      default: return false;
-    }
+    const ok = aplicarMensaje(this, msg, rol, clienteId);
+    if (ok && msg.tipo !== 'marca') this.persistir(); // la marca "estamos aquí" no se persiste, solo se difunde
+    return ok;
   }
 }

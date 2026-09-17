@@ -1,5 +1,8 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
 import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo, lineaAHoja, hojaACuerpo, esFilaAcordes, tokensDudosos } from './chordpro.js';
+import { aplicarMensaje } from './estado-comun.js'; // mismas reglas que el servidor: sin conexión se aplican a la copia de este celular (Paper 13)
+import * as datos from './datos.js';                 // copia local de canciones, setlists y notas; sincronización y cambios pendientes
+import * as nube from './nube.js';                   // nube (Supabase): datos por REST y vivo por tiempo real, cuando la app no se sirve desde la Mac
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -10,14 +13,23 @@ const perfil = cargar('perfil', { nombre: '', instrumento: 'voz', rol: 'musico',
 // una sola vez: los perfiles guardados antes del 11-sep traían "página" sin haberlo elegido; pasan a sección. Desde ahora, cambiarlo en "Yo" es decisión de cada uno (pasoElegido).
 if (!perfil.pasoElegido && !perfil.pasoMigrado) { perfil.paso = 'seccion'; perfil.pasoMigrado = true; guardar('perfil', perfil); }
 const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {}, orden: 'importada' }); // orden: importada | titulo | artista (biblioteca)
+// Fila 214: primero la Mac (la app servida desde ella, por http), si no la nube (la app publicada por https; ?nube=1 para probar desde la Mac).
+{ const p = new URLSearchParams(location.search); if (p.get('banda')) { perfil.claveBanda = p.get('banda'); guardar('perfil', perfil); } if (p.get('nube') === '1') { prefs.nube = true; guardar('prefs', prefs); } if (p.get('nube') === '0') { prefs.nube = false; guardar('prefs', prefs); } } // enlace de instalación con la clave de banda
+const usarNube = nube.disponible() && (location.protocol === 'https:' || prefs.nube === true);
+if (usarNube) { datos.usarFuente(nube.fuenteNube); if (perfil.claveBanda) nube.iniciar(perfil.claveBanda); } // la clave va en cada petición desde el primer momento
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
   perfil.rol = 'director'; if (!perfil.nombre) perfil.nombre = 'Director (Mac)'; guardar('perfil', perfil);
   history.replaceState(null, '', location.pathname);
 }
 let indice = [];                 // [{id,titulo,artista,tono,...}]
-let estado = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], historial: [], controlCantante: false, tonos: {}, conectados: [] };
-let rol = 'musico';              // rol confirmado por el servidor
+const ESTADO_VACIO = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], historial: [], controlCantante: false, tonos: {}, propuestas: {}, conectados: [] };
+// Copia local del estado (Paper 13, fila 214): sin conexión este celular sigue con la cola, el historial y el vivo que tenía;
+// al reconectar manda el servidor. `divergio`: la cola se armó sin conexión (cantante o director) y pasa por aprobación al volver.
+const local = cargar('estadoLocal', { divergio: false, estado: null });
+let estado = local.estado ? { ...ESTADO_VACIO, ...local.estado, propuestas: {}, conectados: [] } : { ...ESTADO_VACIO };
+let rol = perfil.rolConfirmado || 'musico'; // último rol confirmado por el servidor: sin conexión vale el mismo (fila 214)
+function guardarLocal() { guardar('estadoLocal', { estado: { vivo: estado.vivo, siguiente: estado.siguiente, historial: estado.historial, controlCantante: estado.controlCantante, tonos: estado.tonos }, divergio: local.divergio }); }
 let editorPendiente = null;      // canción cuyo editor estaba abierto al recargar: se reabre tras la bienvenida si el rol es director
 async function restaurarEditor() {
   const id = editorPendiente; if (!id) return; editorPendiente = null;
@@ -26,6 +38,7 @@ async function restaurarEditor() {
   try { if (!indice.length) await cargarIndice(); await abrirEditor(id); } catch { irA('biblioteca'); }
 }
 let ws = null, conectado = false, reintento = 1000;
+let vivoNube = null; // conexión al vivo por la nube (nube.js) cuando usarNube
 let estuvoSinRed = false; // hubo conexión y se perdió: al reconectar se vuelve a seguir al vivo aunque se haya navegado por cuenta propia
 let ultimoMensaje = 0; // vigilancia: si en 45 s no llega nada del servidor (latido cada 20 s), la conexión se da por muerta y se reconecta (Paper 10, hallazgo 3)
 setInterval(() => { if (conectado && ultimoMensaje && Date.now() - ultimoMensaje > 45000) { aviso('reconectando…'); try { ws.close(); } catch {} } }, 10000);
@@ -34,13 +47,13 @@ let ultimoGesto = 0; // último toque/rueda/tecla del usuario: solo entonces un 
 let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
 const mostrando = { id: null, cancion: null, seccion: 0, frac: 0, pintadoId: null };
 let scrollProgramatico = false, tScrollProg = null;
-const cacheCho = new Map();
 let setlistAbierto = null;
 let ultimaFirmaBib = '', ultimaFirmaCola = '', ultimaMarcaT = 0;
 
 // ---------- utilidades ----------
-const puedeMover = () => rol === 'director' || (rol === 'cantante' && estado.controlCantante);
-const puedeCola = () => rol === 'director' || rol === 'cantante';
+// sin conexión, cada celular manda sobre su propia copia: todos pueden armar su cola y mover su vivo (Cristhian, 17-sep, fila 214)
+const puedeMover = () => !conectado || rol === 'director' || (rol === 'cantante' && estado.controlCantante);
+const puedeCola = () => !conectado || rol === 'director' || rol === 'cantante';
 const titulo = id => (indice.find(c => c.id === id) || {}).titulo || id || '';
 const artista = id => (indice.find(c => c.id === id) || {}).artista || '';
 const cabPin = () => perfil.pin ? { 'x-pin': perfil.pin } : {};
@@ -49,7 +62,59 @@ async function api(ruta, opciones = {}) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
-function enviar(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+function enviar(msg) {
+  if (usarNube) { if (conectado && vivoNube) { vivoNube.enviar(msg, rol).then(ok => { if (!ok) aviso('sin permiso'); }).catch(() => aviso('no llegó a la nube')); return; } return aplicarLocal(msg); }
+  if (ws && ws.readyState === 1 && conectado) return ws.send(JSON.stringify(msg));
+  aplicarLocal(msg);
+}
+const enviarCrudo = msg => usarNube ? vivoNube.enviar(msg, rol) : ws.send(JSON.stringify(msg)); // directo al servidor que manda (Mac o nube), sin pasar por la copia local
+// Sin conexión: el mensaje se aplica a la copia de este celular con las mismas reglas del servidor (estado-comun.js),
+// como director de su propia copia. La marca "estamos aquí" y el control del cantante necesitan servidor.
+function aplicarLocal(msg) {
+  if (msg.tipo === 'marca' || msg.tipo === 'control') return aviso('necesita conexión');
+  if (msg.tipo === 'vivo' && msg.cancion === undefined) return; // posición del vivo: no hay nadie que la reciba
+  const copia = structuredClone({ ...estado, conectados: [] });
+  if (!aplicarMensaje(copia, msg, 'director', clienteId)) return aviso('no se pudo');
+  if (msg.tipo === 'siguiente' && ['director', 'cantante'].includes(perfil.rolConfirmado)) local.divergio = true; // al reconectar pasa por aprobación
+  aplicarEstado(copia); guardarLocal();
+}
+// Al reconectar (fila 214): si este celular armó cola sin conexión (cantante o director) y difiere de la compartida, se propone
+// y el director decide; el historial del director reemplaza el de la banda. Las colas de los músicos son respaldo: se reemplazan.
+function reconciliar(servidor) {
+  if (!local.divergio) return;
+  local.divergio = false;
+  if (!['director', 'cantante'].includes(rol)) return;
+  const mia = (estado.siguiente || []).slice(), suya = servidor.siguiente || [];
+  if (mia.join(',') !== suya.join(',')) {
+    enviarCrudo({ tipo: 'siguiente', accion: 'proponer', canciones: mia, quien: perfil.nombre || rol });
+    aviso(rol === 'director' ? 'tu cola sin conexión espera tu aprobación' : 'tu cola sin conexión espera al director');
+  }
+  if (rol === 'director') enviarCrudo({ tipo: 'siguiente', accion: 'historial', canciones: estado.historial || [] });
+}
+// Al quedar conectado (Mac o nube): rol confirmado, todos al vivo, cola sin conexión → propuesta, el servidor manda, sincronización
+function alBienvenida(rolServidor, estadoServidor) {
+  conectado = true; rol = rolServidor; if (perfil.rolConfirmado !== rol) { perfil.rolConfirmado = rol; guardar('perfil', perfil); }
+  estuvoSinRed = false; modo = puedeMover() ? 'lider' : 'siguiendo'; // al conectar o tras una caída, todos vuelven al vivo (fila 214)
+  reconciliar(estadoServidor); actualizarConexion(); aplicarEstado(estadoServidor); restaurarEditor();
+  setTimeout(sincronizarAhora, 800);
+}
+// Nube: clave de banda → rol por PIN → canal del vivo (presencia, difusión, estado con versión)
+async function conectarNube() {
+  if (!perfil.claveBanda) { conectado = false; actualizarConexion(); actualizarControles(); if (!$('#vista-ajustes').classList.contains('activa')) { aviso('pon la clave de banda en “Yo”'); irA('ajustes'); } return; }
+  try {
+    nube.iniciar(perfil.claveBanda);
+    if (!(await nube.fuenteNube.bandaOk())) { conectado = false; actualizarConexion(); actualizarControles(); aviso('clave de banda incorrecta: revísala en “Yo”'); return; }
+    const deseado = perfil.rol; let rolNube = 'musico';
+    if (deseado === 'director' || deseado === 'cantante') { const porPin = await nube.fuenteNube.rolPorPin(perfil.pin); if (porPin === deseado) rolNube = deseado; }
+    if (vivoNube) { vivoNube.cerrar(); vivoNube = null; }
+    vivoNube = nube.conectarVivo({
+      perfil, clienteId,
+      alEstado: e => { if (conectado) aplicarEstado(e); },
+      alConectado: u => { reintento = 1000; alBienvenida(rolNube, { ...(u.datos || {}), conectados: [] }); },
+      alCaida: () => { const habia = conectado; conectado = false; if (habia) estuvoSinRed = true; actualizarConexion(); actualizarControles(); if (vivoNube) { vivoNube.cerrar(); vivoNube = null; } programarReintento(); },
+    });
+  } catch (e) { conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); }
+}
 function aviso(t) { const c = $('#conexion-texto'); const antes = c.textContent; c.textContent = t; setTimeout(() => { if (c.textContent === t) actualizarConexion(); }, 2500); }
 
 // ---------- pestañas ----------
@@ -70,15 +135,17 @@ function actualizarConexion() {
   $('#conexion-texto').textContent = conectado ? (rol === 'musico' ? 'conectado' : rol) : 'sin conexión';
 }
 function conectar() {
+  if (usarNube) return conectarNube();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   try { ws = new WebSocket(`${proto}://${location.host}/ws`); } catch { return programarReintento(); }
-  ws.onopen = () => { reintento = 1000; enviar({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId }); };
+  ws.onopen = () => { reintento = 1000; ws.send(JSON.stringify({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId })); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     ultimoMensaje = Date.now();
     if (m.tipo === 'latido') return;
-    if (m.tipo === 'bienvenida') { conectado = true; rol = m.rol; if (estuvoSinRed) { estuvoSinRed = false; modo = puedeMover() ? 'lider' : 'siguiendo'; } actualizarConexion(); aplicarEstado(m.estado); restaurarEditor(); } // tras una caída, vuelve a seguir al vivo
+    if (m.tipo === 'bienvenida') alBienvenida(m.rol, m.estado);
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
+    else if (m.tipo === 'datos-cambiados') sincronizarAhora(); // la Mac bajó cambios de la nube: los celulares en su red se ponen al día
     else if (m.tipo === 'rechazado') aviso('sin permiso');
     else if (m.tipo === 'cancion-cambiada') cancionCambiada(m.id);
   };
@@ -93,6 +160,7 @@ function aplicarEstado(e) {
   const cargaAntes = estado.vivo.carga;
   estado = e;
   if (!Array.isArray(e.historial)) e.historial = [];
+  if (!e.propuestas) e.propuestas = {};
   $('#n-siguiente').textContent = e.siguiente.length || '';
   if (mostrando.id && transpBanda(mostrando.id) !== tonoAntes) mostrando.pintadoId = null; // cambió el tono de la banda: repintar
   if (previa.id && $('#vista-previa').classList.contains('activa')) pintarPrevia();
@@ -115,17 +183,38 @@ function aplicarEstado(e) {
   renderConectados(); actualizarControles();
   const chk = $('#chk-cantante'); if (chk) chk.checked = !!e.controlCantante;
   const bc = $('#btn-cantante'); if (bc) { bc.classList.toggle('activo', !!e.controlCantante); bc.textContent = e.controlCantante ? '🎤 sí' : '🎤 no'; } // acceso rápido en la barra fija (director)
+  renderPropuestas();
+  if (conectado) local.divergio = false; // lo que llega del servidor es la verdad compartida
+  guardarLocal();
+}
+// Colas armadas sin conexión (propuestas): el director elige cuál va al vivo; el cantante ve que la suya espera (fila 214).
+// Mientras el director no elige, el vivo y la cola siguen como estaban.
+function renderPropuestas() {
+  const p = estado.propuestas || {}; const claves = Object.keys(p).filter(k => p[k] && Array.isArray(p[k].canciones));
+  for (const sel of ['#propuestas-vivo', '#propuestas-cola']) {
+    const el = $(sel); if (!el) continue; el.innerHTML = '';
+    const mostrar = conectado && claves.length && (rol === 'director' || (rol === 'cantante' && claves.includes('cantante')));
+    el.hidden = !mostrar; if (!mostrar) continue;
+    if (rol === 'director') {
+      el.innerHTML = '<b>Colas armadas sin conexión. ¿Cuál va al vivo?</b>';
+      const fila = document.createElement('div'); fila.className = 'fila';
+      for (const k of claves) fila.append(boton(`${k === 'director' ? 'Mi cola' : 'Cola del cantante'} (${p[k].canciones.length})`, () => enviar({ tipo: 'siguiente', accion: 'resolver', elegir: k }), 'primario'));
+      fila.append(boton(`Dejar la que estaba (${estado.siguiente.length})`, () => enviar({ tipo: 'siguiente', accion: 'resolver', elegir: 'ninguna' })));
+      el.append(fila);
+      for (const k of claves) { const d = document.createElement('div'); d.className = 'ayuda'; d.textContent = `${k === 'director' ? 'Mi cola' : 'Cola del cantante'}${p[k].quien ? ' (' + p[k].quien + ')' : ''}: ${p[k].canciones.map(titulo).join(' · ') || 'vacía'}`; el.append(d); }
+    } else el.innerHTML = '<div class="ayuda">Tu cola armada sin conexión espera la aprobación del director. Mientras tanto sigues la cola compartida.</div>';
+  }
 }
 function actualizarControles() {
   const lider = puedeMover() && conectado && modo !== 'libre';
-  const sinRed = !conectado && ultimoMensaje > 0 && !!estado.vivo.cancion; // hubo conexión y se perdió: cada uno sigue por su cuenta con la cola que tenía (Paper 10, hallazgo 7)
+  const sinRed = !conectado && !!estado.vivo.cancion; // sin conexión (se perdió, o la app se abrió sin servidor): cada uno sigue con su copia y su cola (Paper 10, hallazgo 7; Paper 13)
   const mostrarBarra = (lider && (rol === 'director' || perfil.botones !== false)) || sinRed; // el director siempre; el cantante puede ocultarla; sin red, todos
   $('#controles-lider').hidden = !mostrarBarra;
   document.body.classList.toggle('con-barra', puedeMover() && conectado && (rol === 'director' || perfil.botones !== false)); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
   $('#btn-volver').hidden = modo !== 'libre';
   const p = $('#vivo-modo');
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');
-  p.textContent = sinRed ? 'sin red · sigues por tu cuenta: ▶▶ pasa la cola en este celular' : modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · lo guardado sigue disponible';
+  p.textContent = sinRed ? 'sin conexión · sigues por tu cuenta: ▶▶ pasa tu cola' : modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · ' + textoCopia();
   $('#panel-director').hidden = rol !== 'director';
   $('#siguiente-acciones').hidden = !(rol === 'director' && estado.siguiente.length);
   $('#ctl-cejilla').style.display = (perfil.cejilla || perfil.instrumento === 'guitarra') ? '' : 'none';
@@ -141,11 +230,9 @@ function vaciarVivo() {
 }
 
 // ---------- mostrar canción ----------
-async function obtenerCho(id) {
-  if (cacheCho.has(id)) return cacheCho.get(id);
-  const { cho } = await api(`/api/canciones/${id}`);
-  cacheCho.set(id, cho); return cho;
-}
+const obtenerCho = id => datos.cancion(id); // memoria → copia del celular → red
+function haceCuanto(t) { const m = Math.round((Date.now() - t) / 60000); if (m < 1) return 'ahora mismo'; if (m < 60) return `hace ${m} min`; const h = Math.round(m / 60); if (h < 48) return `hace ${h} h`; return `hace ${Math.round(h / 24)} días`; }
+function textoCopia() { const s = datos.estadoCopia().ultimaSync; return s ? 'copia sincronizada ' + haceCuanto(s.t) : 'sin copia sincronizada'; }
 const topBarra = () => $('#barra').offsetHeight + 8;
 function posicionDeScroll(y) {
   // dada una posición de scroll, ¿en qué sección y a qué fracción de ella estamos?
@@ -398,21 +485,9 @@ $('#previa-tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1
 $('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
-// sin red, ▶▶ y ◀◀ mueven la cola de este celular (copia local); al volver la red, el estado del servidor manda de nuevo
-function pasarLocal() {
-  if (!estado.siguiente.length) return aviso('cola vacía');
-  if (estado.vivo.cancion) estado.historial = [...(estado.historial || []), estado.vivo.cancion];
-  const id = estado.siguiente.shift(); estado.vivo = { ...estado.vivo, cancion: id, seccion: 0, frac: 0, carga: (estado.vivo.carga || 0) + 1 };
-  $('#n-siguiente').textContent = estado.siguiente.length || ''; renderSiguiente(); mostrar(id, 0, { nueva: true });
-}
-function anteriorLocal() {
-  if (!(estado.historial || []).length) return aviso('no hay canción anterior');
-  const previa = estado.historial.pop(); if (estado.vivo.cancion) estado.siguiente.unshift(estado.vivo.cancion);
-  estado.vivo = { ...estado.vivo, cancion: previa, seccion: 0, frac: 0, carga: (estado.vivo.carga || 0) + 1 };
-  $('#n-siguiente').textContent = estado.siguiente.length || ''; renderSiguiente(); mostrar(previa, 0, { nueva: true });
-}
-$('#lider-pasar').onclick = () => { if (!conectado) return pasarLocal(); if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
-$('#lider-anterior').onclick = () => { if (!conectado) return anteriorLocal(); if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
+// sin conexión, ▶▶ y ◀◀ (y toda la cola) se aplican a la copia de este celular por `enviar` → `aplicarLocal`; al volver la red, el servidor manda
+$('#lider-pasar').onclick = () => { if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
+$('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
 document.addEventListener('keydown', ev => {
@@ -430,6 +505,7 @@ document.addEventListener('keydown', ev => {
 let toque = null, tPresion = null;
 function marcarAqui(el) {
   if (!el || !mostrando.cancion) return; // cualquier integrante puede marcar "estamos aquí"
+  if (!conectado) return aviso('la marca necesita conexión'); // sin servidor no hay a quién avisar (fila 214)
   const pal = el.closest('.pal'); const linea = el.closest('.linea'); const sec = el.closest('[data-sec]');
   if (!sec) return;
   const todo = perfil.vista === 'estructura' || !linea; // desde la vista Estructura (o sin línea bajo el dedo): la sección completa
@@ -490,9 +566,9 @@ $('#btn-tono-orig').onclick = async () => {
   if (/^\{\s*tono\s*:.*\}\s*$/mi.test(cho)) cho = cho.replace(/^\{\s*tono\s*:.*\}\s*$\n?/mi, lineaTono ? lineaTono + '\n' : '');
   else if (lineaTono) cho = cho.replace(/^(\{\s*titulo\s*:.*\}\s*\n)/i, `$1${lineaTono}\n`);
   try {
-    await api(`/api/canciones/${id}`, { method: 'PUT', body: JSON.stringify({ cho }) });
-    cacheCho.set(id, cho); mostrando.cancion = parsear(cho); const e = indice.find(c => c.id === id); if (e) e.tono = nuevo.trim();
-    pintar(); aviso('tono guardado');
+    const r = await datos.guardarCancion(id, cho);
+    mostrando.cancion = parsear(cho); const e = indice.find(c => c.id === id); if (e) e.tono = nuevo.trim();
+    pintar(); aviso(r.pendiente ? 'tono guardado en este celular · pendiente de sincronizar' : 'tono guardado');
   } catch (e) { aviso('no se guardó: ' + e.message); }
 };
 $('#cj-menos').onclick = () => ajustar(prefs.cejilla, -1, 0, 9);
@@ -504,17 +580,17 @@ $('#tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1).toFix
 async function abrirNota() {
   if (!mostrando.id) return; if (!perfil.nombre) { aviso('pon tu nombre en “Yo”'); return irA('ajustes'); }
   $('#nota-panel').hidden = false;
-  try { const { texto } = await api(`/api/notas/${encodeURIComponent(perfil.nombre)}/${mostrando.id}`); $('#nota-texto').value = texto || ''; } catch { $('#nota-texto').value = ''; }
+  try { $('#nota-texto').value = await datos.nota(perfil.nombre, mostrando.id); } catch { $('#nota-texto').value = ''; }
   $('#nota-texto').focus();
 }
 function cerrarNota() { $('#nota-panel').hidden = true; }
 $('#btn-nota').onclick = () => $('#nota-panel').hidden ? abrirNota() : cerrarNota();
 $('#nota-cerrar').onclick = cerrarNota;
-$('#nota-guardar').onclick = async () => { try { await api(`/api/notas/${encodeURIComponent(perfil.nombre)}/${mostrando.id}`, { method: 'PUT', body: JSON.stringify({ texto: $('#nota-texto').value }) }); aviso('nota guardada'); cerrarNota(); } catch (e) { aviso('no se guardó: ' + e.message); } };
+$('#nota-guardar').onclick = async () => { try { const r = await datos.guardarNota(perfil.nombre, mostrando.id, $('#nota-texto').value); aviso(r.pendiente ? 'nota guardada en este celular · se sube al conectar' : 'nota guardada'); cerrarNota(); } catch (e) { aviso('no se guardó: ' + e.message); } };
 
 async function cancionCambiada(id) {
-  cacheCho.delete(id);
-  try { indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca(); } catch {}
+  await datos.refrescarCancion(id);
+  try { indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca(); } catch {}
   if (previa.id === id || (previa.cancion && previa.cancion.secciones.some(s => s.parte && s.parte.id === id))) { try { previa.cancion = parsear(await obtenerCho(previa.id)); previa.expandidas = await expandirConPartes(previa.cancion); if ($('#vista-previa').classList.contains('activa')) pintarPrevia(); } catch {} }
   if (mostrando.id === id || (mostrando.cancion && mostrando.cancion.secciones.some(s => s.parte && s.parte.id === id))) {
     const y = window.scrollY; mostrando.expandidas = null; mostrando.pintadoId = null;
@@ -589,7 +665,7 @@ $('#historial-limpiar').onclick = () => { if (confirm('¿Limpiar el historial de
 $('#siguiente-vaciar').onclick = () => { if (confirm('¿Vaciar la cola?')) enviar({ tipo: 'siguiente', accion: 'vaciar' }); };
 $('#siguiente-guardar').onclick = async () => {
   const nombre = prompt('Nombre del setlist (ej. “Sábado Pueblo Café”):'); if (!nombre) return;
-  try { await api('/api/setlists', { method: 'POST', body: JSON.stringify({ nombre, fecha: new Date().toISOString().slice(0, 10), canciones: estado.siguiente }) }); aviso('setlist guardado'); } catch (e) { aviso('error: ' + e.message); }
+  try { const r = await datos.guardarSetlist(null, { nombre, fecha: new Date().toISOString().slice(0, 10), canciones: estado.siguiente }); aviso(r.pendiente ? 'setlist guardado en este celular · se sube al conectar' : 'setlist guardado'); } catch (e) { aviso('error: ' + e.message); }
 };
 
 // ---------- biblioteca ----------
@@ -610,13 +686,13 @@ function renderBiblioteca() {
   const ul = $('#lista-canciones'); ul.innerHTML = '';
   for (const c of lista.slice(0, 300)) {
     const li = document.createElement('li'); if (c.id === estado.vivo.cancion) li.classList.add('en-vivo');
-    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.genero, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : '', c.importada ? 'importada ' + fechaImportacion(c.importada) : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
+    li.innerHTML = `<div class="info"><div class="t">${c.tipo === 'mix' ? '🎛 ' : c.tipo === 'bloque' ? '🗒 ' : ''}${esc(c.titulo)}</div><div class="s">${esc([c.tipo === 'mix' ? 'mix' : c.tipo === 'bloque' ? 'bloque del show' : '', c.artista, c.genero, c.tono ? 'Tono ' + c.tono : '', c.estado === 'importada' ? '⚠ sin corregir' : '', c.pendiente ? '⏳ pendiente de sincronizar' : '', c.importada ? 'importada ' + fechaImportacion(c.importada) : ''].filter(Boolean).join(' · '))}</div></div><div class="acc"></div>`;
     const acc = li.querySelector('.acc');
     acc.append(boton('Ver', () => verLibre(c.id)));
     if (rol === 'director') acc.append(boton('✎', () => abrirEditor(c.id)));
     if (rol === 'director') acc.append(boton('🗑', async () => { // borrar canción (a la papelera del servidor); pendiente 0m
       if (!confirm(`¿Borrar “${c.titulo}”? Sale de la biblioteca, de la cola y del historial. Queda una copia en datos/papelera.`)) return;
-      try { await api(`/api/canciones/${c.id}`, { method: 'DELETE' }); cacheCho.delete(c.id); await cargarIndice(); renderBiblioteca(); aviso('canción borrada'); } catch (e) { aviso('no se borró: ' + e.message); }
+      try { await datos.borrarCancion(c.id); await cargarIndice(); renderBiblioteca(); aviso('canción borrada'); } catch (e) { aviso('no se borró: ' + e.message); }
     }, 'peligro'));
     if (puedeCola()) acc.append(Object.assign(boton('⤒', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id, donde: 'inicio' }); aviso('va como siguiente'); }), { title: 'Como siguiente (después de la actual)' })); // "reproducir a continuación" (Cristhian, 11-sep)
     if (puedeCola()) acc.append(boton('+ Cola', () => { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: c.id }); aviso('agregada a Siguiente'); }));
@@ -626,10 +702,8 @@ function renderBiblioteca() {
 }
 $('#buscar').oninput = renderBiblioteca;
 async function cargarIndice() {
-  try { indice = await api('/api/canciones'); } catch { indice = indice.length ? indice : []; }
+  try { indice = (await datos.indice()).lista; } catch { indice = indice.length ? indice : []; } // red, o la copia del celular
   renderBiblioteca(); renderSiguiente();
-  // guardar todas las canciones en este teléfono, en segundo plano (el service worker las cachea)
-  (async () => { for (const c of indice) { if (!cacheCho.has(c.id)) { try { await fetch(`/api/canciones/${c.id}`); } catch { break; } } } })();
 }
 
 // ---------- setlists ----------
@@ -638,11 +712,11 @@ async function cargarSetlists() {
   const ul = $('#lista-setlists'); ul.innerHTML = ''; ul.hidden = false; rolSetlists = rol;
   $('#setlist-editor').hidden = true; $('#setlists-director').hidden = rol !== 'director';
   try {
-    const lista = await api('/api/setlists');
+    const { lista } = await datos.setlists();
     if (!lista.length) ul.innerHTML = `<li class="vacio">No hay setlists.${rol === 'director' ? ' Crea uno con “+ Nuevo setlist”.' : ''}</li>`;
     for (const s of lista) {
       const li = document.createElement('li');
-      li.innerHTML = `<div class="info"><div class="t">${esc(s.nombre)}</div><div class="s">${esc(s.fecha)} · ${s.n} canciones</div></div><div class="acc"></div>`;
+      li.innerHTML = `<div class="info"><div class="t">${esc(s.nombre)}</div><div class="s">${esc(s.fecha)} · ${s.n} canciones${s.pendiente ? ' · ⏳ pendiente de sincronizar' : ''}</div></div><div class="acc"></div>`;
       const acc = li.querySelector('.acc');
       acc.append(boton('Abrir', () => abrirSetlist(s.id)));
       if (rol === 'director') {
@@ -655,7 +729,7 @@ async function cargarSetlists() {
 }
 async function abrirSetlist(id) {
   try {
-    setlistAbierto = await api(`/api/setlists/${id}`);
+    setlistAbierto = await datos.setlist(id);
     $('#setlist-nombre').textContent = `${setlistAbierto.nombre} · ${setlistAbierto.fecha}`;
     const ol = $('#setlist-canciones'); ol.innerHTML = '';
     setlistAbierto.canciones.forEach(cid => {
@@ -678,17 +752,17 @@ const sl = { id: null, datos: null };
 async function nuevoSetlist() {
   const nombre = prompt('Nombre del setlist (ej. “Sábado Pueblo Café”):'); if (!nombre || !nombre.trim()) return;
   const fecha = new Date(); const hoy = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
-  try { const { id } = await api('/api/setlists', { method: 'POST', body: JSON.stringify({ nombre: nombre.trim(), fecha: hoy, canciones: [] }) }); await abrirEditorSetlist(id); }
+  try { const { id, pendiente } = await datos.guardarSetlist(null, { nombre: nombre.trim(), fecha: hoy, canciones: [] }); if (pendiente) avisoPendiente(); await abrirEditorSetlist(id); }
   catch (e) { aviso('no se pudo crear: ' + e.message); }
 }
 async function abrirEditorSetlist(id) {
-  try { sl.datos = await api(`/api/setlists/${id}`); sl.id = id; } catch (e) { return aviso('error: ' + e.message); }
+  try { sl.datos = await datos.setlist(id); sl.id = id; } catch (e) { return aviso('error: ' + e.message); }
   $('#lista-setlists').hidden = true; $('#setlists-director').hidden = true; $('#setlist-detalle').hidden = true; $('#setlist-editor').hidden = false;
   $('#sl-nombre').value = sl.datos.nombre || ''; $('#sl-fecha').value = sl.datos.fecha || ''; $('#sl-buscar').value = '';
   renderEditorSetlist();
 }
 async function guardarSetlistEd() {
-  try { await api(`/api/setlists/${sl.id}`, { method: 'PUT', body: JSON.stringify({ nombre: sl.datos.nombre, fecha: sl.datos.fecha, canciones: sl.datos.canciones }) }); }
+  try { const r = await datos.guardarSetlist(sl.id, { nombre: sl.datos.nombre, fecha: sl.datos.fecha, canciones: sl.datos.canciones }); sl.id = r.id; if (r.pendiente) avisoPendiente(); }
   catch (e) { aviso('no se guardó: ' + e.message); }
 }
 function renderEditorSetlist() {
@@ -721,7 +795,7 @@ function renderEditorSetlist() {
 }
 async function borrarSetlist(id, nombre) {
   if (!confirm(`¿Borrar el setlist “${nombre}”? Queda una copia en datos/papelera.`)) return false;
-  try { await api(`/api/setlists/${id}`, { method: 'DELETE' }); aviso('setlist borrado'); cargarSetlists(); return true; }
+  try { await datos.borrarSetlist(id); aviso('setlist borrado'); cargarSetlists(); return true; }
   catch (e) { aviso('no se borró: ' + e.message); return false; }
 }
 $('#btn-nuevo-setlist').onclick = nuevoSetlist;
@@ -740,7 +814,7 @@ $('#setlist-cargar').onclick = () => { if (!setlistAbierto) return; enviar({ tip
 const fechaCorta = iso => { if (!iso) return 'nunca'; const d = new Date(iso); const hoy = new Date(); const mismoDia = d.toDateString() === hoy.toDateString(); return (mismoDia ? 'hoy' : d.toLocaleDateString('es', { day: '2-digit', month: 'short' })) + ' ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); };
 async function cargarIntegrantes() {
   const caja = $('#quien-eres'), cont = $('#integrantes'); if (!caja) return;
-  let lista = []; try { lista = await api('/api/integrantes'); } catch { lista = []; }
+  let lista = []; try { lista = await datos.integrantes(); } catch { lista = []; }
   caja.hidden = !lista.length; cont.innerHTML = '';
   for (const i of lista) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'integrante' + (perfil.nombre && perfil.nombre.toLowerCase() === String(i.nombre).toLowerCase() ? ' yo' : '');
@@ -753,16 +827,18 @@ async function cargarIntegrantes() {
     cont.append(b);
   }
 }
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas', 'claveBanda']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; $('#campo-banda').hidden = !usarNube; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
 $('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
   if (f.elements.paso.value !== perfil.paso) perfil.pasoElegido = true; // lo cambió a mano: ya es su elección
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso']) perfil[k] = f.elements[k].value;
+  if (f.elements.claveBanda) perfil.claveBanda = f.elements.claveBanda.value.trim();
   perfil.lineas = Math.max(1, Math.min(10, Number(f.elements.lineas.value) || 4)); f.elements.lineas.value = perfil.lineas;
   perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked; perfil.ajustar = f.elements.ajustar.checked;
   guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
   try { ws && ws.close(); } catch {} // reconecta con el nuevo perfil/rol
+  if (usarNube) { conectado = false; if (vivoNube) { vivoNube.cerrar(); vivoNube = null; } actualizarConexion(); conectar(); }
   aviso('perfil guardado'); irA('vivo');
 };
 $('#chk-cantante').onchange = ev => enviar({ tipo: 'control', cantante: ev.target.checked });
@@ -773,6 +849,7 @@ function renderConectados() {
   if (!estado.conectados.length) ul.innerHTML = '<li class="vacio">nadie conectado</li>';
 }
 async function cargarInfo() {
+  if (usarNube) { $('#panel-mac').hidden = true; $('#info-servidor').innerHTML = `Conectada a la <b>nube</b> (${esc((window.NUBE && window.NUBE.url || '').replace('https://', ''))}) · vivo por tiempo real · clave de banda ${perfil.claveBanda ? 'guardada' : '<b>falta</b>'}`; return; }
   try {
     const i = await api('/api/info');
     $('#panel-mac').hidden = !i.local; // solo en la propia Mac: vuelve al panel con el QR
@@ -802,13 +879,18 @@ async function abrirEditor(id) {
 }
 async function guardarEditor(cho) {
   editor.cho = cho;
-  await api(`/api/canciones/${editor.id}`, { method: 'PUT', body: JSON.stringify({ cho }) });
-  cacheCho.set(editor.id, cho); // el aviso del servidor repinta el vivo en todos
+  const r = await datos.guardarCancion(editor.id, cho); // con conexión, el aviso del servidor repinta el vivo en todos
+  if (r.pendiente) { // sin conexión: queda en este celular, pendiente de sincronizar (fila 214); el vivo propio se repinta
+    avisoPendiente();
+    if (mostrando.id === editor.id) { const y = window.scrollY; mostrando.expandidas = null; mostrando.pintadoId = null; await mostrar(editor.id, mostrando.seccion, { frac: mostrando.frac, desplazar: false }); scrollA(y); }
+  }
 }
+let tAvisoPend = 0;
+function avisoPendiente() { if (Date.now() - tAvisoPend > 4000) { tAvisoPend = Date.now(); aviso('guardado en este celular · pendiente de sincronizar'); } }
 function lineasCuerpo() { return editor.cho.replace(/\r/g, '').split('\n'); }
 const antes = (a, b) => a.i < b.i || (a.i === b.i && a.w <= b.w);
 async function cargarNombres() {
-  let usados = []; try { usados = await api('/api/secciones'); } catch {}
+  let usados = []; try { usados = await datos.secciones(); } catch {} // de la copia local: sirve en la Mac, en la nube y sin conexión
   const nombres = [...new Set([...NOMBRES_ESTANDAR, ...usados])];
   const sel = $('#ed-nombre-sel'); sel.innerHTML = '<option value="">Nombre de la sección…</option>';
   for (const n of nombres) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.append(o); }
@@ -1533,7 +1615,7 @@ function renderPartes(c) {
 // descartar un mix (a la papelera del servidor, como cualquier canción) y salir; si está vacío al volver, se ofrece borrarlo (Cristhian, 11-sep, fila 162)
 async function descartarMix(preguntar = true) {
   if (preguntar && !confirm(`¿Descartar el mix “${$('#ed-titulo').textContent}”? Queda una copia en datos/papelera.`)) return false;
-  try { await api(`/api/canciones/${editor.id}`, { method: 'DELETE' }); cacheCho.delete(editor.id); await cargarIndice(); renderBiblioteca(); aviso('mix descartado'); irA('biblioteca'); return true; }
+  try { await datos.borrarCancion(editor.id); await cargarIndice(); renderBiblioteca(); aviso('mix descartado'); irA('biblioteca'); return true; }
   catch (e) { aviso('no se pudo descartar: ' + e.message); return false; }
 }
 $('#ed-mix-descartar').onclick = () => descartarMix(true);
@@ -1545,8 +1627,8 @@ $('#ed-volver').onclick = async () => {
 async function nuevaCancionEspecial(tipo) {
   const t = prompt(tipo === 'mix' ? 'Título del mix:' : 'Título del bloque del show:'); if (!t || !t.trim()) return;
   try {
-    const { id } = await api('/api/canciones', { method: 'POST', body: JSON.stringify({ cho: `{titulo: ${t.trim()}}\n{tipo: ${tipo}}\n{estado: corregida}\n` }) });
-    indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+    const { id, pendiente } = await datos.crearCancion(`{titulo: ${t.trim()}}\n{tipo: ${tipo}}\n{estado: corregida}\n`); if (pendiente) avisoPendiente();
+    indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca();
     await abrirEditor(id);
   } catch (e) { aviso('no se pudo crear: ' + e.message); }
 }
@@ -1556,7 +1638,7 @@ $('#btn-nuevo-bloque').onclick = () => nuevaCancionEspecial('bloque');
 // ---------- género: desplegable con básicos + usados + "agregar otro" ----------
 const GENEROS_BASE = ['Rock', 'Balada', 'Tropical', 'Salsa', 'Bolero', 'Pachanga'];
 async function llenarGeneros(sel, actual = '') {
-  let usados = []; try { usados = await api('/api/generos'); } catch {}
+  let usados = []; try { usados = await datos.generos(); } catch {}
   const todos = [...new Set([...GENEROS_BASE, ...usados, ...(actual ? [actual] : [])])].sort((a, b) => a.localeCompare(b));
   sel.innerHTML = '<option value="">Género…</option>';
   for (const g of todos) { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.append(o); }
@@ -1575,13 +1657,13 @@ $('#ed-genero').onchange = async ev => {
   $('#ed-genero-nuevo').hidden = !nueva; $('#ed-genero-ok').hidden = !nueva;
   if (nueva) { $('#ed-genero-nuevo').focus(); return; }
   await guardarEditor(conGenero(editor.cho, ev.target.value)); aviso('género guardado');
-  indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+  indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca();
 };
 $('#ed-genero-ok').onclick = async () => {
   const g = $('#ed-genero-nuevo').value.trim(); if (!g) return aviso('escribe el género');
   await guardarEditor(conGenero(editor.cho, g)); $('#ed-genero-nuevo').hidden = true; $('#ed-genero-ok').hidden = true; $('#ed-genero-nuevo').value = '';
   await llenarGeneros($('#ed-genero'), g); aviso('género guardado');
-  indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+  indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca();
 };
 
 // ---------- importar por pegado (director) ----------
@@ -1615,8 +1697,8 @@ $('#imp-guardar').onclick = async () => {
   const gsel = $('#imp-genero').value; const genero = gsel === NUEVA ? $('#imp-genero-nuevo').value.trim() : gsel;
   if (genero) impCho = conGenero(impCho, genero);
   try {
-    const { id } = await api('/api/canciones', { method: 'POST', body: JSON.stringify({ cho: impCho }) });
-    indice = await api('/api/canciones'); ultimaFirmaBib = ''; renderBiblioteca();
+    const { id, pendiente } = await datos.crearCancion(impCho); if (pendiente) avisoPendiente();
+    indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca();
     $('#imp-texto').value = ''; $('#imp-titulo').value = ''; $('#imp-artista').value = ''; $('#imp-tono').value = ''; $('#imp-cejilla').value = ''; $('#imp-genero').value = ''; $('#imp-genero-nuevo').value = ''; $('#imp-genero-nuevo').hidden = true; $('#imp-cancion').innerHTML = ''; $('#imp-info').textContent = ''; $('#imp-guardar').disabled = true;
     aviso('canción guardada');
     await abrirEditor(id);
@@ -1654,17 +1736,42 @@ document.addEventListener('touchend', e => { const ahora = Date.now(); if (ahora
 
 llenarPerfil(); actualizarConexion(); actualizarControles();
 document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
-cargarIndice().then(conectar).then(() => setTimeout(precargarTodo, 1500));
-// Precarga total (Paper 10, hallazgos 2 y 7): con conexión, cada celular guarda en silencio todo el repertorio y los setlists,
-// así sin red cualquier canción abre (el service worker las conserva) y los cambios de canción no dependen del WiFi en ese instante.
-let precargando = false;
-async function precargarTodo() {
-  if (precargando) return; precargando = true;
-  try {
-    for (const c of indice) { if (!cacheCho.has(c.id)) { try { await obtenerCho(c.id); } catch { break; } } }
-    try { const ls = await api('/api/setlists'); for (const s of ls) { try { await api(`/api/setlists/${s.id}`); } catch {} } } catch {}
-  } finally { precargando = false; }
+datos.configurar({ cabeceras: cabPin, quien: () => perfil.nombre || '', alCambiar: () => { renderCopia(); } });
+datos.cargarEstadoCopia().then(() => { actualizarControles(); renderCopia(); });
+// al abrir: primero lo que este celular tenía (vivo, cola, historial) para que se vea aunque no haya servidor; luego se conecta y el servidor manda
+cargarIndice().then(() => { if (local.estado) aplicarEstado(structuredClone(estado)); }).then(conectar);
+// Sincronización (Paper 13, fila 214): al conectar y cada 5 minutos, este celular baja lo que cambió (por versión) y sube lo que
+// guardó sin conexión. Reemplaza la precarga del Paper 10: la copia vive en IndexedDB, no en el service worker.
+async function sincronizarAhora({ avisar = false } = {}) {
+  const r = await datos.sincronizar().catch(e => ({ error: e.message }));
+  if (r.ocupado) return r;
+  if (r.sinRed) { if (avisar) aviso('sin conexión: no se pudo sincronizar'); }
+  else if (r.error) { if (avisar) aviso('error al sincronizar: ' + r.error); }
+  else {
+    if (r.bajadas || r.subidas || r.conflictos || r.borradas) { indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca(); renderSiguiente(); }
+    if (avisar) aviso(`sincronizada · ${r.bajadas} bajadas · ${r.subidas} subidas${r.conflictos ? ` · ${r.conflictos} por resolver` : ''}`);
+    if (r.conflictos) { aviso('hay cambios por resolver: mira en “Yo”'); }
+  }
+  actualizarControles(); renderCopia(); return r;
 }
+setInterval(() => { if (conectado) sincronizarAhora(); }, 5 * 60 * 1000);
+// Panel "Copia en este celular" (Yo): qué hay guardado, cuándo se sincronizó, qué falta subir y qué quedó por resolver
+async function renderCopia() {
+  const el = $('#copia-info'); if (!el) return;
+  const s = datos.estadoCopia(); let pend = [], conf = [];
+  try { pend = await datos.pendientes(); conf = await datos.conflictos(); } catch {}
+  const cuando = s.sincronizando ? 'sincronizando…' : s.ultimaSync ? `sincronizada ${haceCuanto(s.ultimaSync.t)} (${fechaCorta(new Date(s.ultimaSync.t).toISOString())})` : 'nunca sincronizada: sin conexión no habrá canciones';
+  const nombrePend = p => p.tipo === 'nota' ? `nota de ${titulo(p.cancion)}` : p.tipo === 'setlist' ? `setlist ${p.obj.nombre || ''}` : titulo(p.id);
+  el.innerHTML = `<b>${indice.length} canciones</b> · ${esc(cuando)}${pend.length ? `<br>⏳ ${pend.length} cambio${pend.length === 1 ? '' : 's'} por subir: ${esc(pend.map(nombrePend).join(', '))}` : ''}`;
+  const c = $('#copia-conflictos'); c.innerHTML = ''; c.hidden = !conf.length;
+  if (conf.length) {
+    c.innerHTML = '<b>Por resolver en el editor</b> (la Mac y un celular cambiaron la misma canción, o un cambio no se pudo subir):';
+    for (const x of conf) { const d = document.createElement('div'); d.className = 'ayuda'; d.textContent = x.error ? `${x.original}: no se subió (${x.error})` : `“${x.titulo}” quedó guardada aparte; “${titulo(x.original)}” quedó como la tenía la Mac`; c.append(d); }
+    c.append(boton('Entendido, quitar este aviso', () => datos.limpiarConflictos()));
+  }
+  const b = $('#copia-sync'); if (b) b.disabled = !!s.sincronizando;
+}
+$('#copia-sync').onclick = () => sincronizarAhora({ avisar: true });
 // al cargar: sin perfil → "Yo"; si no, la pestaña (y la canción del editor) donde estaba este dispositivo
 if (!perfil.nombre) irA('ajustes');
 else if (prefs.vista === 'editor' && prefs.editorId) { editorPendiente = prefs.editorId; irA('biblioteca'); } // el editor se abre cuando el servidor confirme el rol (bienvenida)

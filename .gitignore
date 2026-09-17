@@ -4,7 +4,10 @@ datos/
 *.cho
 !datos.ejemplo/**/*.cho
 # Node
+node_modules
 node_modules/
+# App publicable construida por herramientas/construir_web.mjs
+dist/
 npm-debug.log*
 # macOS
 .DS_Store

@@ -30,9 +30,13 @@ export class Almacen {
     const dir = this.dirCanciones();
     return fs.readdirSync(dir).filter(f => f.endsWith('.cho')).sort().map(f => {
       const id = f.slice(0, -4);
-      const cho = fs.readFileSync(path.join(dir, f), 'utf8');
+      const ruta = path.join(dir, f);
+      const cho = fs.readFileSync(ruta, 'utf8');
       const meta = this.leerMeta(cho);
-      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '', importada: meta.importada || '' };
+      let st = null; try { st = fs.statSync(ruta); } catch {}
+      // v: versión de la canción (fecha de modificación del archivo): cada celular baja solo lo que cambió desde su última sincronización (Paper 13).
+      // creada: fecha de creación del archivo, con hora (el campo importada solo guarda el día; fila 212).
+      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '', importada: meta.importada || '', v: st ? Math.round(st.mtimeMs) : 0, creada: st ? Math.round((st.birthtimeMs || st.mtimeMs)) : 0 };
     });
   }
   leerCancion(id) {
@@ -76,7 +80,8 @@ export class Almacen {
     const dir = path.join(this.raiz, 'setlists');
     return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
       const s = this.leerJson(path.join('setlists', f), {});
-      return { id: f.slice(0, -5), nombre: s.nombre || f.slice(0, -5), fecha: s.fecha || '', n: (s.canciones || []).length };
+      let st = null; try { st = fs.statSync(path.join(dir, f)); } catch {}
+      return { id: f.slice(0, -5), nombre: s.nombre || f.slice(0, -5), fecha: s.fecha || '', n: (s.canciones || []).length, v: st ? Math.round(st.mtimeMs) : 0 };
     }).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   }
   leerSetlist(id) { return this.idValido(id) ? this.leerJson(path.join('setlists', id + '.json'), null) : null; }

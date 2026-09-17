@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { Almacen } from './almacen.js';
 import { Estado } from './estado.js';
+import { sincronizarNube, leerEnv } from './nube.js';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ_APP = path.join(AQUI, '..');
@@ -17,7 +18,7 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(RAIZ_APP, 'package.json'), 
 const ARRANQUE = Date.now();
 // Huella de la app: cambia con cualquier cambio en los archivos del cliente. Se inyecta en sw.js para que cada despliegue
 // sea una caché nueva y completa (los celulares no mezclan versiones; Paper 10, hallazgo 1).
-const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'manifest.webmanifest', 'icono.svg'];
+const ARCHIVOS_APP = ['index.html', 'css/app.css', 'js/app.js', 'js/chordpro.js', 'js/datos.js', 'js/estado-comun.js', 'js/nube.js', 'js/nube.config.js', 'js/vendor/supabase.js', 'manifest.webmanifest', 'icono.svg'];
 let huellaCache = { firma: '', valor: '' };
 function huellaApp() { // se recalcula sola cuando cambia algún archivo (por fecha y tamaño), sin relanzar el servidor
   const firma = ARCHIVOS_APP.map(f => { try { const st = fs.statSync(path.join(AQUI, '..', 'web', f)); return f + st.mtimeMs + st.size; } catch { return f; } }).join('|');
@@ -35,6 +36,18 @@ if (!fs.existsSync(path.join(DATOS, 'canciones'))) {
 }
 const almacen = new Almacen(DATOS);
 const estado = new Estado(almacen);
+// Nube (Paper 13, fila 214): si existe datos/nube.env, la Mac sincroniza datos/ con Supabase en los dos sentidos:
+// al arrancar, cada 10 minutos y 3 s después de cada cambio hecho desde la app. Si bajó algo, avisa a los celulares de su red.
+const NUBE = !!leerEnv(DATOS);
+let tNube = null, nubeCorriendo = false;
+async function correrNube(motivo) {
+  if (!NUBE || nubeCorriendo) return; nubeCorriendo = true;
+  try { const r = await sincronizarNube({ datos: DATOS }); if (r && !r.sinNube) { console.log(`nube (${motivo}):`, JSON.stringify(r)); if (r.bajadas || r.setlists || r.borradasMac) difundirDatosCambiados(); } }
+  catch (e) { console.error('nube:', e.message); }
+  finally { nubeCorriendo = false; }
+}
+function programarNube() { if (!NUBE) return; clearTimeout(tNube); tNube = setTimeout(() => correrNube('cambio'), 3000); }
+if (NUBE) { setTimeout(() => correrNube('arranque'), 2000); setInterval(() => correrNube('periódica'), 10 * 60 * 1000); }
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.mp4': 'video/mp4' };
@@ -76,7 +89,7 @@ const servidor = http.createServer(async (req, res) => {
       const rec = partes[1], id = partes[2];
       const local = esLocal(req);
       let rol = rolPorPin(req.headers['x-pin']); if (rol === 'musico' && local) rol = 'director';
-      if (rec === 'info') return json(res, 200, { version: VERSION, huella: huellaApp(), puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE });
+      if (rec === 'info') return json(res, 200, { version: VERSION, huella: huellaApp(), puerto: PUERTO, ips: ipsLocales(), datos: path.basename(DATOS), ejemplo: DATOS.endsWith('datos.ejemplo'), local, arranque: ARRANQUE, nube: NUBE });
       if (rec === 'apagar') { // solo desde la propia Mac (panel de control)
         if (!local || req.method !== 'POST') return json(res, 403, { error: 'solo desde la Mac' });
         json(res, 200, { ok: true }); console.log('Apagado desde el panel de la Mac.'); setTimeout(() => process.exit(0), 300); return;
@@ -111,16 +124,16 @@ const servidor = http.createServer(async (req, res) => {
         if (req.method === 'GET' && !id) return json(res, 200, almacen.indiceSetlists());
         if (req.method === 'GET') { const s = almacen.leerSetlist(id); return s ? json(res, 200, { id, ...s }) : json(res, 404, { error: 'no existe' }); }
         if (rol !== 'director') return json(res, 403, { error: 'solo el director edita setlists' });
-        if (req.method === 'DELETE' && id) return almacen.eliminarSetlist(id) ? json(res, 200, { id, borrado: true }) : json(res, 404, { error: 'no existe' });
+        if (req.method === 'DELETE' && id) { const ok = almacen.eliminarSetlist(id); if (ok) programarNube(); return ok ? json(res, 200, { id, borrado: true }) : json(res, 404, { error: 'no existe' }); }
         const cuerpo = await leerCuerpo(req);
         const nuevoId = id || ((cuerpo.fecha || new Date().toISOString().slice(0, 10)) + '-' + String(cuerpo.nombre || 'setlist').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
-        almacen.guardarSetlist(nuevoId, cuerpo); return json(res, 200, { id: nuevoId });
+        almacen.guardarSetlist(nuevoId, cuerpo); programarNube(); return json(res, 200, { id: nuevoId });
       }
       if (rec === 'notas') {
         const usuario = decodeURIComponent(id || ''), cancion = partes[3];
         if (!usuario || !cancion) return json(res, 400, { error: 'ruta: /api/notas/<usuario>/<cancion>' });
         if (req.method === 'GET') return json(res, 200, { texto: almacen.leerNota(usuario, cancion) });
-        if (req.method === 'PUT') { const c = await leerCuerpo(req); almacen.guardarNota(usuario, cancion, String(c.texto || '')); return json(res, 200, { ok: true }); }
+        if (req.method === 'PUT') { const c = await leerCuerpo(req); almacen.guardarNota(usuario, cancion, String(c.texto || '')); programarNube(); return json(res, 200, { ok: true }); }
       }
       return json(res, 404, { error: 'ruta desconocida' });
     }
@@ -144,7 +157,9 @@ const wss = new WebSocketServer({ server: servidor, path: '/ws' });
 function avisarCancion(id) { // una canción cambió en disco: los clientes descartan su copia
   const m = JSON.stringify({ tipo: 'cancion-cambiada', id });
   for (const c of wss.clients) if (c.readyState === 1) c.send(m);
+  programarNube();
 }
+function difundirDatosCambiados() { const m = JSON.stringify({ tipo: 'datos-cambiados' }); for (const c of wss.clients) if (c.readyState === 1) c.send(m); }
 function difundir() {
   const m = JSON.stringify({ tipo: 'estado', estado: estado.snapshot() });
   for (const c of wss.clients) if (c.readyState === 1) c.send(m);
