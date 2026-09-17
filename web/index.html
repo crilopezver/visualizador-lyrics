@@ -234,6 +234,10 @@
   <!-- AJUSTES / PERFIL -->
   <section id="vista-ajustes" class="vista">
     <h2>Yo</h2>
+    <div id="banda-caja" class="caja" hidden>
+      <label>Clave de banda <input id="banda-input" maxlength="40" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="la da el director"></label>
+      <p class="ayuda" id="banda-ayuda">Escribe la clave y abajo aparecen los integrantes: toca tu nombre y listo.</p>
+    </div>
     <div id="quien-eres" hidden>
       <p class="ayuda">¿Quién eres? Toca tu nombre y queda guardado en este celular.</p>
       <div id="integrantes" class="fila"></div>
@@ -249,7 +253,6 @@
         <select name="rol"><option value="musico">Músico</option><option value="cantante">Cantante</option><option value="director">Director</option></select></label>
       <label id="campo-pin">PIN <input name="pin" type="password" inputmode="numeric" maxlength="12" placeholder="solo director y cantante"></label>
       <p class="ayuda">Director y cantante tienen PIN distinto; los da el director. Sin PIN válido entras como músico.</p>
-      <label id="campo-banda" hidden>Clave de banda <input name="claveBanda" maxlength="40" autocomplete="off" autocapitalize="off" placeholder="la da el director; abre la nube de la banda"></label>
       <label class="switch"><input type="checkbox" name="cejilla"> Uso cejilla (muestra el control de cejilla)</label>
       <label class="switch" id="campo-botones"><input type="checkbox" name="botones" checked> Mostrar botones atrás / siguiente / avanzar cuando controlo el vivo (el director los tiene siempre)</label>
       <label>Vista

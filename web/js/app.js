@@ -100,7 +100,7 @@ function alBienvenida(rolServidor, estadoServidor) {
 }
 // Nube: clave de banda → rol por PIN → canal del vivo (presencia, difusión, estado con versión)
 async function conectarNube() {
-  if (!perfil.claveBanda) { conectado = false; actualizarConexion(); actualizarControles(); if (!$('#vista-ajustes').classList.contains('activa')) { aviso('pon la clave de banda en “Yo”'); irA('ajustes'); } return; }
+  if (!perfil.claveBanda) { conectado = false; actualizarConexion(); actualizarControles(); if (!$('#vista-ajustes').classList.contains('activa')) { aviso('pon la clave de banda en “Yo”'); irA('ajustes'); } setTimeout(() => $('#banda-input').focus(), 300); return; }
   try {
     nube.iniciar(perfil.claveBanda);
     if (!(await nube.fuenteNube.bandaOk())) { conectado = false; actualizarConexion(); actualizarControles(); aviso('clave de banda incorrecta: revísala en “Yo”'); return; }
@@ -827,13 +827,25 @@ async function cargarIntegrantes() {
     cont.append(b);
   }
 }
-function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas', 'claveBanda']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; $('#campo-banda').hidden = !usarNube; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
+function llenarPerfil() { const f = $('#form-perfil'); for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso', 'lineas']) if (f.elements[k]) f.elements[k].value = perfil[k] ?? ''; $('#banda-caja').hidden = !usarNube; $('#banda-input').value = perfil.claveBanda || ''; $('#banda-ayuda').textContent = perfil.claveBanda ? 'Clave guardada. Abajo, toca tu nombre.' : 'Escribe la clave y abajo aparecen los integrantes: toca tu nombre y listo.'; f.elements.cejilla.checked = !!perfil.cejilla; f.elements.botones.checked = perfil.botones !== false; f.elements.ajustar.checked = perfil.ajustar !== false; $('#campo-lineas').hidden = f.elements.paso.value !== 'lineas'; }
 $('#form-perfil').elements.paso.onchange = ev => { $('#campo-lineas').hidden = ev.target.value !== 'lineas'; };
+// Clave de banda (modo nube): con solo escribirla la app se conecta y muestra "¿Quién eres?" para tocar el nombre (Cristhian, 17-sep: nada más que llenar)
+let tBanda = null;
+async function aplicarClaveBanda(v) {
+  v = v.trim(); if (v === (perfil.claveBanda || '') || v.length < 8) return;
+  perfil.claveBanda = v; guardar('perfil', perfil); if (!usarNube) return;
+  nube.iniciar(v);
+  const ok = await nube.fuenteNube.bandaOk().catch(() => false);
+  if (!ok) { $('#banda-ayuda').textContent = 'Esa clave no abre la nube de la banda: revísala.'; return; }
+  $('#banda-ayuda').textContent = 'Clave guardada. Abajo, toca tu nombre.'; aviso('clave de banda guardada');
+  await cargarIntegrantes(); await cargarIndice(); if (!conectado) conectar();
+}
+$('#banda-input').addEventListener('input', ev => { clearTimeout(tBanda); tBanda = setTimeout(() => aplicarClaveBanda(ev.target.value), 500); });
+$('#banda-input').addEventListener('change', ev => { clearTimeout(tBanda); aplicarClaveBanda(ev.target.value); });
 $('#form-perfil').onsubmit = ev => {
   ev.preventDefault(); const f = ev.target;
   if (f.elements.paso.value !== perfil.paso) perfil.pasoElegido = true; // lo cambió a mano: ya es su elección
   for (const k of ['nombre', 'instrumento', 'rol', 'pin', 'vista', 'paso']) perfil[k] = f.elements[k].value;
-  if (f.elements.claveBanda) perfil.claveBanda = f.elements.claveBanda.value.trim();
   perfil.lineas = Math.max(1, Math.min(10, Number(f.elements.lineas.value) || 4)); f.elements.lineas.value = perfil.lineas;
   perfil.cejilla = f.elements.cejilla.checked; perfil.botones = f.elements.botones.checked; perfil.ajustar = f.elements.ajustar.checked;
   guardar('perfil', perfil); mostrando.pintadoId = null; pintar(); actualizarControles();
@@ -1748,7 +1760,7 @@ async function sincronizarAhora({ avisar = false } = {}) {
   if (r.sinRed) { if (avisar) aviso('sin conexión: no se pudo sincronizar'); }
   else if (r.error) { if (avisar) aviso('error al sincronizar: ' + r.error); }
   else {
-    if (r.bajadas || r.subidas || r.conflictos || r.borradas) { indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca(); renderSiguiente(); }
+    if (r.bajadas || r.subidas || r.conflictos || r.borradas || !indice.length) { indice = (await datos.indice()).lista; ultimaFirmaBib = ''; renderBiblioteca(); renderSiguiente(); }
     if (avisar) aviso(`sincronizada · ${r.bajadas} bajadas · ${r.subidas} subidas${r.conflictos ? ` · ${r.conflictos} por resolver` : ''}`);
     if (r.conflictos) { aviso('hay cambios por resolver: mira en “Yo”'); }
   }
