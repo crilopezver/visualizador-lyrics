@@ -5,6 +5,7 @@
 import { aplicarMensaje } from './estado-comun.js';
 
 const cfg = () => window.NUBE || null;
+let diag = () => {}; export function usarDiag(fn) { diag = fn; } // registro de diagnóstico de app.js (fila 229)
 export const disponible = () => !!(cfg() && window.supabase);
 let clave = '', cliente = null;
 export function iniciar(claveBanda) {
@@ -70,7 +71,7 @@ export function conectarVivo({ perfil, clienteId, alEstado, alConectado, alCaida
   const entregar = (marca = null) => { if (ultimo.datos) alEstado({ ...ultimo.datos, marca, conectados: conectados() }); };
   async function leerEstado() {
     const [f] = await rest('estado?id=eq.1&select=datos,version');
-    if (f && f.version > ultimo.version) { ultimo = { datos: f.datos, version: f.version }; entregar(); }
+    if (f && f.version > ultimo.version) { diag('sondeo', `v${ultimo.version} → v${f.version}`); ultimo = { datos: f.datos, version: f.version }; entregar(); }
     return ultimo;
   }
   canal
@@ -80,6 +81,7 @@ export function conectarVivo({ perfil, clienteId, alEstado, alConectado, alCaida
     .on('presence', { event: 'join' }, () => entregar())
     .on('presence', { event: 'leave' }, () => entregar())
     .subscribe(async status => {
+      diag('canal', status);
       if (status === 'SUBSCRIBED') {
         try { await canal.track({ nombre: perfil.nombre || 'anónimo', rol: perfil.rol, instrumento: perfil.instrumento, clienteId }); await leerEstado(); if (!listo) { listo = true; alConectado(ultimo); } setTimeout(() => entregar(), 1200); }
         catch (e) { if (!cerrado) alCaida(e); }
@@ -95,8 +97,10 @@ export function conectarVivo({ perfil, clienteId, alEstado, alConectado, alCaida
       if (!aplicarMensaje(copia, msg, rol, clienteId)) return false;
       const v = await rest('rpc/guardar_estado', { method: 'POST', body: JSON.stringify({ nuevo: copia, base: ultimo.version }) });
       if (typeof v === 'number') { ultimo = { datos: copia, version: v }; entregar(); canal.send({ type: 'broadcast', event: 'estado', payload: { datos: copia, version: v } }); return true; }
+      diag('conflicto', `${msg.tipo} base v${ultimo.version} intento ${intento + 1}`);
       await leerEstado(); // otro cambió antes: se vuelve a aplicar sobre lo nuevo
     }
+    diag('guardar-fallo', `${msg.tipo} tras 4 intentos`);
     return false;
   }
   return {

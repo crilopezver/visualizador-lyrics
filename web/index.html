@@ -280,6 +280,12 @@
     </div>
     <div id="conectados-panel"><h3>Conectados</h3><ul id="conectados" class="lista compacta"></ul></div>
     <div id="panel-mac" hidden><a class="boton primario" href="/mac" target="_blank">📱 Panel de la Mac: QR para entrar y cerrar app</a></div>
+    <div id="diag-panel">
+      <h3>Registro de diagnóstico</h3>
+      <p class="ayuda">Este celular anota su conexión, el vivo que recibe, los cambios de modo y lo que envía (últimos 400 eventos; se guardan solo aquí y no gastan datos). Si en un toque algo se desincroniza, compártelo con el director.</p>
+      <div class="fila"><button id="diag-compartir">Compartir</button><button id="diag-copiar">Copiar</button><button id="diag-borrar">Borrar</button><span id="diag-n" class="ayuda" style="align-self:center"></span></div>
+      <details><summary class="ayuda">Ver el registro</summary><pre id="diag-texto" class="ayuda" style="white-space:pre-wrap;font-size:.75rem;max-height:40vh;overflow:auto;margin:.4rem 0"></pre></details>
+    </div>
     <div id="info-servidor" class="ayuda"></div>
   </section>
 </main>

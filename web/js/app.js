@@ -45,6 +45,26 @@ setInterval(() => { if (conectado && ultimoMensaje && Date.now() - ultimoMensaje
 const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
 let ultimoGesto = 0; // último toque/rueda/tecla del usuario: solo entonces un scroll cuenta como suyo
 let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
+// ---------- registro de diagnóstico (Cristhian, 18-sep, fila 229) ----------
+// Cada celular anota en localStorage sus últimos eventos: conexión, estado del vivo recibido, cambios de modo, envíos y pantalla.
+// Sirve para entender una desincronización después de un toque. No sale del celular salvo que alguien lo comparta desde "Yo".
+const DIAG_MAX = 400;
+let diagLista = (() => { try { return JSON.parse(localStorage.getItem('diag') || '[]'); } catch { return []; } })();
+const diagUlt = {}; // eventos frecuentes (posiciones del vivo): se anota uno cada 3 s y se cuenta cuántos hubo entre medio
+function diag(ev, detalle = '', clave = null) {
+  const ahora = Date.now();
+  if (clave) { const u = diagUlt[clave]; if (u && ahora - u.t < 3000) { u.n++; return; } if (u && u.n) detalle += ` (+${u.n})`; diagUlt[clave] = { t: ahora, n: 0 }; }
+  const d = new Date(ahora);
+  diagLista.push(`${d.toTimeString().slice(0, 8)} ${ev}${detalle ? ' ' + detalle : ''}`);
+  if (diagLista.length > DIAG_MAX) diagLista.splice(0, diagLista.length - DIAG_MAX);
+  try { localStorage.setItem('diag', JSON.stringify(diagLista)); } catch {}
+  if (typeof renderDiag === 'function' && $('#vista-ajustes').classList.contains('activa')) renderDiag();
+}
+function cambiarModo(m, causa) { if (m === modo) return; diag('modo', `${modo} → ${m} (${causa})`); modo = m; }
+const resumenMsg = m => m.tipo === 'vivo' ? (m.cancion !== undefined ? `vivo ${m.cancion}` : `pos s${m.seccion} f${Number(m.frac || 0).toFixed(2)}`) : `${m.tipo}${m.accion ? ' ' + m.accion : ''}${m.cancion ? ' ' + m.cancion : ''}`;
+diag('inicio', `${new Date().toISOString().slice(0, 10)} ${nube.disponible() && (location.protocol === 'https:' || prefs.nube === true) ? 'nube' : 'mac'} rol=${perfil.rol || '-'} ${perfil.nombre || ''} ${(navigator.userAgent.match(/iPhone|iPad|Android|Macintosh/) || [''])[0]}`);
+document.addEventListener('visibilitychange', () => diag('pantalla', document.visibilityState));
+window.addEventListener('online', () => diag('red', 'online')); window.addEventListener('offline', () => diag('red', 'offline'));
 const mostrando = { id: null, cancion: null, seccion: 0, frac: 0, pintadoId: null };
 let scrollProgramatico = false, tScrollProg = null;
 let setlistAbierto = null;
@@ -63,9 +83,10 @@ async function api(ruta, opciones = {}) {
   return r.json();
 }
 function enviar(msg) {
-  if (usarNube) { if (conectado && vivoNube) { vivoNube.enviar(msg, rol).then(ok => { if (!ok) aviso('sin permiso'); }).catch(() => aviso('no llegó a la nube')); return; } return aplicarLocal(msg); }
+  const esPos = msg.tipo === 'vivo' && msg.cancion === undefined; diag('envío', resumenMsg(msg), esPos ? 'envio-pos' : null);
+  if (usarNube) { if (conectado && vivoNube) { vivoNube.enviar(msg, rol).then(ok => { if (!ok) { aviso('sin permiso'); diag('envío-rechazado', resumenMsg(msg)); } }).catch(e => { aviso('no llegó a la nube'); diag('envío-error', `${resumenMsg(msg)} ${e && e.message}`); }); return; } diag('envío-local', 'sin conexión con la nube'); return aplicarLocal(msg); }
   if (ws && ws.readyState === 1 && conectado) return ws.send(JSON.stringify(msg));
-  aplicarLocal(msg);
+  diag('envío-local', 'sin conexión con la Mac'); aplicarLocal(msg);
 }
 const enviarCrudo = msg => usarNube ? vivoNube.enviar(msg, rol) : ws.send(JSON.stringify(msg)); // directo al servidor que manda (Mac o nube), sin pasar por la copia local
 // Sin conexión: el mensaje se aplica a la copia de este celular con las mismas reglas del servidor (estado-comun.js),
@@ -94,7 +115,8 @@ function reconciliar(servidor) {
 // Al quedar conectado (Mac o nube): rol confirmado, todos al vivo, cola sin conexión → propuesta, el servidor manda, sincronización
 function alBienvenida(rolServidor, estadoServidor) {
   conectado = true; rol = rolServidor; if (perfil.rolConfirmado !== rol) { perfil.rolConfirmado = rol; guardar('perfil', perfil); }
-  estuvoSinRed = false; modo = puedeMover() ? 'lider' : 'siguiendo'; // al conectar o tras una caída, todos vuelven al vivo (fila 214)
+  diag('conectado', `rol=${rolServidor} vivo=${(estadoServidor.vivo || {}).cancion || '-'} c${(estadoServidor.vivo || {}).carga || 0}`);
+  estuvoSinRed = false; cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'conexión'); // al conectar o tras una caída, todos vuelven al vivo (fila 214)
   reconciliar(estadoServidor); actualizarConexion(); aplicarEstado(estadoServidor); restaurarEditor();
   setTimeout(sincronizarAhora, 800);
 }
@@ -102,7 +124,7 @@ function alBienvenida(rolServidor, estadoServidor) {
 async function conectarNube() {
   if (!perfil.claveBanda) { conectado = false; actualizarConexion(); actualizarControles(); if (!$('#vista-ajustes').classList.contains('activa')) { aviso('pon la clave de banda en “Yo”'); irA('ajustes'); } setTimeout(() => $('#banda-input').focus(), 300); return; }
   try {
-    nube.iniciar(perfil.claveBanda);
+    nube.iniciar(perfil.claveBanda); nube.usarDiag(diag);
     if (!(await nube.fuenteNube.bandaOk())) { conectado = false; actualizarConexion(); actualizarControles(); aviso('clave de banda incorrecta: revísala en “Yo”'); return; }
     const deseado = perfil.rol; let rolNube = 'musico';
     if (deseado === 'director' || deseado === 'cantante') { const porPin = await nube.fuenteNube.rolPorPin(perfil.pin); if (porPin === deseado) rolNube = deseado; }
@@ -111,9 +133,9 @@ async function conectarNube() {
       perfil, clienteId,
       alEstado: e => { if (conectado) aplicarEstado(e); },
       alConectado: u => { reintento = 1000; alBienvenida(rolNube, { ...(u.datos || {}), conectados: [] }); },
-      alCaida: () => { const habia = conectado; conectado = false; if (habia) estuvoSinRed = true; actualizarConexion(); actualizarControles(); if (vivoNube) { vivoNube.cerrar(); vivoNube = null; } programarReintento(); },
+      alCaida: e => { diag('caída', `nube ${e && e.message || ''} (estaba ${conectado ? 'conectado' : 'sin conexión'})`); const habia = conectado; conectado = false; if (habia) estuvoSinRed = true; actualizarConexion(); actualizarControles(); if (vivoNube) { vivoNube.cerrar(); vivoNube = null; } programarReintento(); },
     });
-  } catch (e) { conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); }
+  } catch (e) { diag('caída', `nube al conectar: ${e && e.message}`); conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); }
 }
 function aviso(t) { const c = $('#conexion-texto'); const antes = c.textContent; c.textContent = t; setTimeout(() => { if (c.textContent === t) actualizarConexion(); }, 2500); }
 
@@ -124,7 +146,8 @@ function irA(vista) {
   $$('#tabs button').forEach(b => b.classList.toggle('activa', b.dataset.vista === vista));
   $$('.vista').forEach(v => v.classList.toggle('activa', v.id === 'vista-' + vista));
   if (vista === 'setlists') cargarSetlists();
-  if (vista === 'ajustes') { cargarInfo(); cargarIntegrantes(); }
+  if (vista === 'ajustes') { cargarInfo(); cargarIntegrantes(); renderDiag(); }
+  diag('pestaña', vista);
 }
 $$('#tabs button').forEach(b => b.onclick = () => irA(b.dataset.vista));
 
@@ -146,18 +169,19 @@ function conectar() {
     if (m.tipo === 'bienvenida') alBienvenida(m.rol, m.estado);
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
     else if (m.tipo === 'datos-cambiados') sincronizarAhora(); // la Mac bajó cambios de la nube: los celulares en su red se ponen al día
-    else if (m.tipo === 'rechazado') aviso('sin permiso');
+    else if (m.tipo === 'rechazado') { aviso('sin permiso'); diag('envío-rechazado', 'mac'); }
     else if (m.tipo === 'cancion-cambiada') cancionCambiada(m.id);
   };
-  ws.onclose = () => { if (conectado && ultimoMensaje) estuvoSinRed = true; conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); };
+  ws.onclose = () => { diag('caída', `mac ws (estaba ${conectado ? 'conectado' : 'sin conexión'})`); if (conectado && ultimoMensaje) estuvoSinRed = true; conectado = false; actualizarConexion(); actualizarControles(); programarReintento(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
-function programarReintento() { setTimeout(conectar, reintento); reintento = Math.min(reintento * 1.6, 8000); }
+function programarReintento() { diag('reintento', `en ${Math.round(reintento)} ms`, 'reintento'); setTimeout(conectar, reintento); reintento = Math.min(reintento * 1.6, 8000); }
 
 // ---------- estado compartido ----------
 function aplicarEstado(e) {
   const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
   const cargaAntes = estado.vivo.carga;
+  diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado');
   estado = e;
   if (!Array.isArray(e.historial)) e.historial = [];
   if (!e.propuestas) e.propuestas = {};
@@ -166,7 +190,7 @@ function aplicarEstado(e) {
   if (previa.id && $('#vista-previa').classList.contains('activa')) pintarPrevia();
   if (e.marca && e.marca.por !== clienteId && e.marca.t !== ultimaMarcaT && mostrando.id === e.vivo.cancion) { ultimaMarcaT = e.marca.t; setTimeout(() => mostrarMarca(e.marca), 50); }
   if (modo !== 'libre') {
-    modo = puedeMover() ? 'lider' : 'siguiendo';
+    cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'estado');
     if (e.vivo.cancion) {
       // quien movió el vivo ignora su propio eco (ya está ahí); todos los demás se desplazan
       // una carga nueva en el vivo (el contador `carga` del servidor sube) siempre lleva al inicio, aunque sea la misma canción repetida (antes se quedaba al final)
@@ -367,7 +391,7 @@ let pasoPropio = 'deslizar'; // cómo se movió por última vez este dispositivo
 function moverAScroll(y, paso = perfil.paso || 'pagina') {
   pasoPropio = paso;
   const pos = posicionDeScroll(y);
-  if (modo !== 'lider') { modo = 'libre'; actualizarControles(); }
+  if (modo !== 'lider') { cambiarModo('libre', 'mover ' + paso); actualizarControles(); }
   else enviar({ tipo: 'vivo', seccion: pos.seccion, frac: pos.frac, paso });
   mostrando.seccion = pos.seccion; mostrando.frac = pos.frac; marcarSeccion(pos.seccion);
   scrollA(y);
@@ -449,11 +473,11 @@ window.addEventListener('scroll', () => {
     const espera = 80 - (Date.now() - tUltimoEnvio);
     clearTimeout(tEnvioPendiente);
     if (espera <= 0) enviarPos(); else tEnvioPendiente = setTimeout(enviarPos, espera);
-  } else if (modo === 'siguiendo') { modo = 'libre'; actualizarControles(); }
+  } else if (modo === 'siguiendo') { cambiarModo('libre', 'deslizar'); actualizarControles(); }
 }, { passive: true });
 function irASeccion(i) {
   pasoPropio = 'seccion';
-  if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0, paso: 'seccion' }); else { modo = 'libre'; actualizarControles(); }
+  if (modo === 'lider') enviar({ tipo: 'vivo', seccion: i, frac: 0, paso: 'seccion' }); else { cambiarModo('libre', 'sección'); actualizarControles(); }
   mostrar(mostrando.id, i, { frac: 0 });
 }
 // ---------- previa: ver una canción sin tocar el vivo (reemplaza al antiguo "Ver" en navegación libre) ----------
@@ -482,7 +506,7 @@ $('#previa-cola').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente',
 $('#previa-siguiente').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: previa.id, donde: 'inicio' }); aviso('va como siguiente'); } };
 $('#previa-tam-menos').onclick = () => { prefs.tam = Math.max(0.8, +(prefs.tam - 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
 $('#previa-tam-mas').onclick = () => { prefs.tam = Math.min(3, +(prefs.tam + 0.1).toFixed(2)); guardar('prefs', prefs); pintarPrevia(); };
-$('#btn-volver').onclick = () => { modo = puedeMover() ? 'lider' : 'siguiendo'; actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
+$('#btn-volver').onclick = () => { cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'volver al vivo'); actualizarControles(); irA('vivo'); if (estado.vivo.cancion) mostrar(estado.vivo.cancion, estado.vivo.seccion, { frac: estado.vivo.frac || 0 }); else vaciarVivo(); };
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
 // sin conexión, ▶▶ y ◀◀ (y toda la cola) se aplican a la copia de este celular por `enviar` → `aplicarLocal`; al volver la red, el servidor manda
@@ -860,6 +884,15 @@ function renderConectados() {
   for (const c of estado.conectados) { const li = document.createElement('li'); li.textContent = `${c.nombre}${c.instrumento ? ' · ' + c.instrumento : ''}${c.rol !== 'musico' ? ' · ' + c.rol : ''}`; ul.append(li); }
   if (!estado.conectados.length) ul.innerHTML = '<li class="vacio">nadie conectado</li>';
 }
+function renderDiag() {
+  const pre = $('#diag-texto'); if (!pre) return;
+  $('#diag-n').textContent = `${diagLista.length} eventos`;
+  pre.textContent = diagLista.slice(-DIAG_MAX).join('\n'); if (pre.closest('details').open) pre.scrollTop = pre.scrollHeight;
+}
+const diagTexto = () => `Visualizador Lyrics · registro de ${perfil.nombre || 'anónimo'} (${perfil.rol || '-'}) · ${clienteId}\n` + diagLista.join('\n');
+$('#diag-compartir').onclick = async () => { const text = diagTexto(); try { if (navigator.share) await navigator.share({ title: 'Registro de diagnóstico', text }); else { await navigator.clipboard.writeText(text); aviso('copiado'); } } catch {} };
+$('#diag-copiar').onclick = async () => { try { await navigator.clipboard.writeText(diagTexto()); aviso('copiado'); } catch { aviso('no se pudo copiar'); } };
+$('#diag-borrar').onclick = () => { diagLista = []; try { localStorage.removeItem('diag'); } catch {} renderDiag(); diag('registro borrado'); };
 async function cargarInfo() {
   if (usarNube) { $('#panel-mac').hidden = true; $('#info-servidor').innerHTML = `Conectada a la <b>nube</b> (${esc((window.NUBE && window.NUBE.url || '').replace('https://', ''))}) · vivo por tiempo real · clave de banda ${perfil.claveBanda ? 'guardada' : '<b>falta</b>'}`; return; }
   try {
