@@ -57,6 +57,7 @@ main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 #vivo-herr{display:flex;flex-wrap:wrap;gap:.4rem .8rem;align-items:center;margin-top:.5rem;font-size:.85rem;color:var(--tenue)}
 .ctl{display:inline-flex;align-items:center;gap:.25rem}
 .ctl button,.ctl-btn{padding:.25rem .55rem;font-size:.9rem}
+.ctl button:disabled{opacity:.35;cursor:default} /* ◀ ▶ de la Previa en los extremos de la lista */
 .ctl span{min-width:1.4rem;text-align:center;color:var(--texto);font-weight:700}
 .ctl.solo-lectura button{display:none}
 #vivo-tono-info{color:var(--acorde);font-weight:700}

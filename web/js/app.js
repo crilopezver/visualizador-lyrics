@@ -388,7 +388,23 @@ function pintarPrevia() {
   art.className = 'lienzo vista-' + perfil.vista;
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: -1, secciones: previa.expandidas });
   document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
+  pintarNavPrevia();
 }
+// ◀ ▶ en la Previa: anterior / siguiente de la biblioteca tal como esté filtrada y ordenada en ese momento (Cristhian, 18-sep).
+// Si la canción abierta no está en esa lista (vino de la cola o de un setlist con otro filtro), los botones quedan apagados.
+function pintarNavPrevia() {
+  const lista = listaBiblioteca(); const i = lista.findIndex(c => c.id === previa.id);
+  $('#previa-ant').disabled = i <= 0; $('#previa-sig').disabled = i < 0 || i >= lista.length - 1;
+  $('#previa-pos').textContent = i < 0 ? '—' : `${i + 1}/${lista.length}`;
+  $('#previa-nav').title = i < 0 ? 'Esta canción no está en la lista de Canciones con el filtro actual' : '';
+}
+function moverPrevia(paso) {
+  const lista = listaBiblioteca(); const i = lista.findIndex(c => c.id === previa.id); const j = i + paso;
+  if (i < 0 || j < 0 || j >= lista.length) return;
+  verLibre(lista[j].id);
+}
+$('#previa-ant').onclick = () => moverPrevia(-1);
+$('#previa-sig').onclick = () => moverPrevia(1);
 $('#previa-editar').onclick = () => { if (previa.id) abrirEditor(previa.id); };
 $('#previa-vivo').onclick = () => { if (previa.id) { enviar({ tipo: 'vivo', cancion: previa.id }); irA('vivo'); } };
 $('#previa-cola').onclick = () => { if (previa.id) { enviar({ tipo: 'siguiente', accion: 'agregar', cancion: previa.id }); aviso('agregada a Siguiente'); } };
@@ -598,13 +614,17 @@ function boton(txt, fn, clase = '') { const b = document.createElement('button')
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const fechaImportacion = iso => { const [a, m, d] = String(iso).split('-'); return a && m && d ? `${d}-${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][Number(m) - 1] || m}-${a.slice(2)}` : iso; };
 $('#bib-orden').onchange = ev => { prefs.orden = ev.target.value; guardar('prefs', prefs); renderBiblioteca(); };
-function renderBiblioteca() {
+function listaBiblioteca() { // la biblioteca tal como se ve: filtrada por el buscador y ordenada según "Ordenar por" (la usan la lista y los ◀ ▶ de la Previa)
   const q = norm($('#buscar').value.trim());
   const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q) || norm(c.genero).includes(q));
   // orden: por fecha de importación (última primero; sin fecha al final), por título o por artista (Cristhian, 09-sep)
   const orden = prefs.orden || 'importada'; const sel = $('#bib-orden'); if (sel && sel.value !== orden) sel.value = orden;
   const cmpTexto = (a, b) => norm(a).localeCompare(norm(b), 'es');
   lista.sort((a, b) => orden === 'importada' ? ((b.importada || '').localeCompare(a.importada || '') || cmpTexto(a.titulo, b.titulo)) : orden === 'artista' ? ((!a.artista) - (!b.artista) || cmpTexto(a.artista, b.artista) || cmpTexto(a.titulo, b.titulo)) : cmpTexto(a.titulo, b.titulo));
+  return lista;
+}
+function renderBiblioteca() {
+  const lista = listaBiblioteca();
   $('#bib-info').textContent = `${lista.length} de ${indice.length} canciones`;
   $('#bib-director').hidden = rol !== 'director';
   const ul = $('#lista-canciones'); ul.innerHTML = '';
