@@ -958,8 +958,8 @@ async function cargarNombres() {
   let usados = []; try { usados = await datos.secciones(); } catch {} // de la copia local: sirve en la Mac, en la nube y sin conexión
   const nombres = [...new Set([...NOMBRES_ESTANDAR, ...usados])];
   const sel = $('#ed-nombre-sel'); sel.innerHTML = '<option value="">Nombre de la sección…</option>';
-  for (const n of nombres) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.append(o); }
-  const o = document.createElement('option'); o.value = NUEVA; o.textContent = '＋ Agregar nueva…'; sel.append(o);
+  const o = document.createElement('option'); o.value = NUEVA; o.textContent = '＋ Agregar nueva…'; sel.append(o); // arriba de todo: crear un instrumental no debe obligar a recorrer toda la lista (Cristhian, 18-sep)
+  for (const n of nombres) { const o2 = document.createElement('option'); o2.value = n; o2.textContent = n; sel.append(o2); }
   return nombres;
 }
 $('#ed-nombre-sel').onchange = ev => { const nueva = ev.target.value === NUEVA; $('#ed-nombre-nuevo').hidden = !nueva; if (nueva) $('#ed-nombre-nuevo').focus(); };
@@ -1179,7 +1179,14 @@ function menuBloque(j) {
   const guardarOrden = arr => { edA.menu = null; guardarAcordes(conArreglo(editor.cho, arr)); };
   if (idx > 0) div.append(boton('↑ Mover arriba', () => { const a = ordenActual(); [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; guardarOrden(a); }));
   if (idx < n - 1) div.append(boton('↓ Mover abajo', () => { const a = ordenActual(); [a[idx + 1], a[idx]] = [a[idx], a[idx + 1]]; guardarOrden(a); }));
+  if (idx > 0) div.append(boton('⤒ Llevar al inicio', () => { const a = ordenActual(); a.unshift(...a.splice(idx, 1)); guardarOrden(a); }));
+  if (idx < n - 1) div.append(boton('⤓ Llevar al final', () => { const a = ordenActual(); a.push(...a.splice(idx, 1)); guardarOrden(a); }));
   div.append(boton('⧉ Repetir después', () => { const a = ordenActual(); a.splice(idx + 1, 0, b.nombre); guardarOrden(a); }));
+  if (idx < n - 1) div.append(boton('⧉ Repetir al final', () => { const a = ordenActual(); a.push(b.nombre); guardarOrden(a); }));
+  // añadir una sección nueva (o repetir una ya definida) justo aquí: solo en esta aparición del arreglo
+  const posArchivo = donde => { const L = lineasCuerpo(); if (!b.sec || b.sec.ini < 0) return L.length; return donde === 'antes' ? b.sec.ini : rangoSeccion(L, b.sec.ini).sig; };
+  div.append(boton('＋ Añadir sección antes', () => abrirNuevaSeccion(posArchivo('antes'), div, idx)));
+  div.append(boton('＋ Añadir sección después', () => abrirNuevaSeccion(posArchivo('despues'), div, idx + 1)));
   if (n > 1) div.append(boton('✕ Quitar esta aparición', () => { const a = ordenActual(); a.splice(idx, 1); guardarOrden(a); }, 'peligro'));
   if (b.sec) {
     div.append(boton('✎ Renombrar', () => {
@@ -1428,7 +1435,7 @@ $('#edA-cancion').addEventListener('click', e => {
   if (e.target.closest('.ed-rehacer')) { if (edA.editando && edA.editando.rehacer) edA.editando.rehacer(); return; }
   if (e.target.closest('.ed-listo')) { guardarBloque(); return; }
   if (e.target.closest('.ed-cancelar')) { cancelarBloque(); return; }
-  if (e.target.closest('.edicion') || e.target.closest('.nota-caja') || e.target.closest('.menu-bloque')) return;
+  if (e.target.closest('.edicion') || e.target.closest('.nota-caja') || e.target.closest('.menu-bloque') || e.target.closest('#ed-nueva-sec')) return;
   const mb = e.target.closest('.mas-bloque'); if (mb) { const j = Number(mb.dataset.j); edA.menu = edA.menu === j ? null : j; renderEditorAcordes(); return; }
   const cl = e.target.closest('.cortar-linea'); if (cl) { cortarEn(Number(cl.dataset.l)); return; }
   const us = e.target.closest('.usar-seccion'); if (us) { const a = ordenActual(); a.push(us.dataset.nombre); guardarAcordes(conArreglo(editor.cho, a)); return; }
@@ -1463,14 +1470,15 @@ $('#edA-estado').onclick = () => {
 };
 // "añadir sección aquí": inserta {seccion} (+ acordes y nota opcionales) en la posición elegida del archivo
 let posNuevaSec = null;
-function abrirNuevaSeccion(pos, fila) {
-  posNuevaSec = pos;
+let posNuevaSecArreglo = null; // índice del arreglo donde entra la sección nueva (solo desde Estructura); null = desde Secciones
+function abrirNuevaSeccion(pos, fila, enArreglo = null) {
+  posNuevaSec = pos; posNuevaSecArreglo = enArreglo;
   const f = $('#ed-nueva-sec'); f.hidden = false; fila.insertAdjacentElement('afterend', f);
   $('#ed-ns-nombre').innerHTML = $('#ed-nombre-sel').innerHTML; $('#ed-ns-nombre').value = '';
   $('#ed-ns-nombre-nuevo').hidden = true; $('#ed-ns-nombre-nuevo').value = ''; $('#ed-ns-acordes').value = ''; $('#ed-ns-nota').value = '';
 }
 $('#ed-ns-nombre').onchange = ev => { $('#ed-ns-nombre-nuevo').hidden = ev.target.value !== NUEVA; if (ev.target.value === NUEVA) $('#ed-ns-nombre-nuevo').focus(); };
-$('#ed-ns-cancelar').onclick = () => { $('#ed-nueva-sec').hidden = true; $('#sub-secciones').append($('#ed-nueva-sec')); posNuevaSec = null; };
+$('#ed-ns-cancelar').onclick = () => { const enArr = posNuevaSecArreglo; $('#ed-nueva-sec').hidden = true; $('#sub-secciones').append($('#ed-nueva-sec')); posNuevaSec = null; posNuevaSecArreglo = null; if (enArr !== null) { edA.menu = null; renderEditorAcordes(); } };
 $('#ed-ns-agregar').onclick = async () => {
   const v = $('#ed-ns-nombre').value; const nombre = v === NUEVA ? $('#ed-ns-nombre-nuevo').value.trim() : v;
   if (!nombre) return aviso('elige o escribe el nombre');
@@ -1479,8 +1487,12 @@ $('#ed-ns-agregar').onclick = async () => {
   const L = lineasCuerpo(); let pos = posNuevaSec;
   if (pos >= L.length) { while (L.length && !L[L.length - 1].trim()) L.pop(); L.push('', ...bloque); }
   else { if (pos > 0 && L[pos - 1].trim()) bloque.unshift(''); L.splice(pos, 0, ...bloque); }
-  $('#ed-nueva-sec').hidden = true; $('#sub-secciones').append($('#ed-nueva-sec')); posNuevaSec = null;
-  await guardarEditor(L.join('\n')); aviso('sección agregada'); renderEditor();
+  const enArr = posNuevaSecArreglo;
+  $('#ed-nueva-sec').hidden = true; $('#sub-secciones').append($('#ed-nueva-sec')); posNuevaSec = null; posNuevaSecArreglo = null;
+  if (enArr === null) { await guardarEditor(L.join('\n')); aviso('sección agregada'); renderEditor(); return; }
+  // desde Estructura: además de crearla en la canción, entra en el arreglo solo en esta posición
+  const a = ordenActual(); a.splice(enArr, 0, nombre); edA.menu = null;
+  await guardarAcordes(conArreglo(L.join('\n'), arregloEditor().length ? a : [])); aviso('sección agregada');
 };
 // editar la nota o la letra de una sección (desde su cabecera en Secciones)
 let edSec = null; // { i: línea de la marca, modo: 'nota' | 'letra' }
