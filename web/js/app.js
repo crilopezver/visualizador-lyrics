@@ -617,10 +617,10 @@ $('#bib-orden').onchange = ev => { prefs.orden = ev.target.value; guardar('prefs
 function listaBiblioteca() { // la biblioteca tal como se ve: filtrada por el buscador y ordenada según "Ordenar por" (la usan la lista y los ◀ ▶ de la Previa)
   const q = norm($('#buscar').value.trim());
   const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q) || norm(c.genero).includes(q));
-  // orden: por fecha de importación (última primero; sin fecha al final), por título o por artista (Cristhian, 09-sep)
+  // orden: por fecha de importación (última primero; sin fecha al final) y, dentro del mismo día, por hora real de creación del archivo (Cristhian, 18-sep, 7c); por título o por artista (Cristhian, 09-sep)
   const orden = prefs.orden || 'importada'; const sel = $('#bib-orden'); if (sel && sel.value !== orden) sel.value = orden;
   const cmpTexto = (a, b) => norm(a).localeCompare(norm(b), 'es');
-  lista.sort((a, b) => orden === 'importada' ? ((b.importada || '').localeCompare(a.importada || '') || cmpTexto(a.titulo, b.titulo)) : orden === 'artista' ? ((!a.artista) - (!b.artista) || cmpTexto(a.artista, b.artista) || cmpTexto(a.titulo, b.titulo)) : cmpTexto(a.titulo, b.titulo));
+  lista.sort((a, b) => orden === 'importada' ? ((b.importada || '').localeCompare(a.importada || '') || ((b.creada || 0) - (a.creada || 0)) || cmpTexto(a.titulo, b.titulo)) : orden === 'artista' ? ((!a.artista) - (!b.artista) || cmpTexto(a.artista, b.artista) || cmpTexto(a.titulo, b.titulo)) : cmpTexto(a.titulo, b.titulo));
   return lista;
 }
 function renderBiblioteca() {

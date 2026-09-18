@@ -32,7 +32,8 @@ export class Almacen {
       const id = f.slice(0, -4);
       const cho = fs.readFileSync(path.join(dir, f), 'utf8');
       const meta = this.leerMeta(cho);
-      return { id, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '', importada: meta.importada || '' };
+      const st = fs.statSync(path.join(dir, f)); const creada = Math.round(st.birthtimeMs || st.mtimeMs); // hora real de creación del archivo: desempata el orden "por importación" (Cristhian, 18-sep, pendiente 7c); el mismo campo que usa la nube
+      return { id, creada, titulo: meta.titulo || id, artista: meta.artista || '', tono: meta.tono || '', cejilla: meta.cejilla || '', estado: meta.estado || '', tipo: meta.tipo || '', genero: meta.genero || meta.género || '', importada: meta.importada || '' };
     });
   }
   leerCancion(id) {
