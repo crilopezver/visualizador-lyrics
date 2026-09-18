@@ -181,7 +181,7 @@ function programarReintento() { diag('reintento', `en ${Math.round(reintento)} m
 function aplicarEstado(e) {
   const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
   const cargaAntes = estado.vivo.carga;
-  diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado');
+  diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado:' + ((e.vivo || {}).cancion || '-')); // cada cambio de canción se anota; las posiciones dentro de la misma se resumen
   estado = e;
   if (!Array.isArray(e.historial)) e.historial = [];
   if (!e.propuestas) e.propuestas = {};
