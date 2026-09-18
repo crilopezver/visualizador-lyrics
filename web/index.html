@@ -64,13 +64,15 @@
   <section id="vista-previa" class="vista">
     <div id="previa-cab">
       <div id="previa-titulo">Nada en vista previa</div>
-      <div id="previa-sub" class="sub">Toca “Ver” en Canciones, en la cola o en un setlist.</div>
+      <div id="previa-sub">Toca “Ver” en Canciones, en la cola o en un setlist.</div>
       <div class="fila" id="previa-acciones" hidden>
         <button id="previa-editar" class="primario" hidden>✎ Editar</button>
         <button id="previa-vivo" hidden>▶ Vivo</button>
         <button id="previa-siguiente" hidden>⤒ Siguiente</button>
         <button id="previa-cola" hidden>+ Cola</button>
         <label class="ctl">Letra <button id="previa-tam-menos">A−</button><button id="previa-tam-mas">A+</button></label>
+        <!-- ◀ ▶ recorren la biblioteca tal como esté filtrada y ordenada, sin volver a la lista (Cristhian, 18-sep) -->
+        <label class="ctl" id="previa-nav"><button id="previa-ant" title="Canción anterior en la lista de Canciones">◀</button><span id="previa-pos"></span><button id="previa-sig" title="Canción siguiente en la lista de Canciones">▶</button></label>
       </div>
     </div>
     <article id="cancion-previa" class="lienzo"></article>
