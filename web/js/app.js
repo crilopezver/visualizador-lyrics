@@ -65,6 +65,22 @@ const resumenMsg = m => m.tipo === 'vivo' ? (m.cancion !== undefined ? `vivo ${m
 diag('inicio', `${new Date().toISOString().slice(0, 10)} ${nube.disponible() && (location.protocol === 'https:' || prefs.nube === true) ? 'nube' : 'mac'} rol=${perfil.rol || '-'} ${perfil.nombre || ''} ${(navigator.userAgent.match(/iPhone|iPad|Android|Macintosh/) || [''])[0]}`);
 document.addEventListener('visibilitychange', () => diag('pantalla', document.visibilityState));
 window.addEventListener('online', () => diag('red', 'online')); window.addEventListener('offline', () => diag('red', 'offline'));
+// Pedal en iPhone (23-sep, verificado en el iPhone de Cristhian con una página de prueba): iOS solo entrega las teclas de un teclado
+// físico a la página cuando un campo editable tiene el foco; sin campo no llega nada, con inputmode="none" llegan las cuatro flechas
+// y no aparece el teclado en pantalla. Este campo invisible retiene el foco mientras se está en "En vivo".
+const pedalFoco = document.createElement('input');
+pedalFoco.id = 'pedal-foco'; pedalFoco.type = 'text'; pedalFoco.tabIndex = -1;
+pedalFoco.setAttribute('inputmode', 'none'); pedalFoco.setAttribute('autocomplete', 'off'); pedalFoco.setAttribute('autocorrect', 'off'); pedalFoco.setAttribute('autocapitalize', 'off'); pedalFoco.setAttribute('aria-hidden', 'true');
+pedalFoco.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;margin:0;pointer-events:none;z-index:-1';
+pedalFoco.addEventListener('input', () => { pedalFoco.value = ''; });
+document.body.append(pedalFoco);
+function enfocarPedal() {
+  if (!$('#vista-vivo').classList.contains('activa')) return;
+  const a = document.activeElement; if (a && a !== pedalFoco && (['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName) || a.isContentEditable)) return; // no robar el foco a un campo real
+  try { pedalFoco.focus({ preventScroll: true }); } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') enfocarPedal(); });
+for (const t of ['pointerup', 'click']) $('#vista-vivo').addEventListener(t, enfocarPedal); // tras cualquier toque en el vivo, el foco vuelve al campo (síncrono: iOS solo deja enfocar dentro del gesto del usuario)
 const mostrando = { id: null, cancion: null, seccion: 0, frac: 0, pintadoId: null };
 let scrollProgramatico = false, tScrollProg = null;
 let setlistAbierto = null;
@@ -147,6 +163,7 @@ function irA(vista) {
   $$('.vista').forEach(v => v.classList.toggle('activa', v.id === 'vista-' + vista));
   if (vista === 'setlists') cargarSetlists();
   if (vista === 'ajustes') { cargarInfo(); cargarIntegrantes(); renderDiag(); }
+  if (vista === 'vivo') enfocarPedal();
   diag('pestaña', vista);
 }
 $$('#tabs button').forEach(b => b.onclick = () => irA(b.dataset.vista));
@@ -531,7 +548,7 @@ $('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) ret
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
 document.addEventListener('keydown', ev => {
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  if (document.activeElement !== pedalFoco && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if (!$('#vista-vivo').classList.contains('activa')) return;
   // Pedal M-Wave (Paper 09): ↓ canción siguiente y ↑ canción anterior (como ▶▶ y ◀◀ de la barra; solo quien controla el vivo),
   // ←→ por sección siempre (Cristhian, 09-sep, filas 125 y 128); las demás teclas siguen el modo configurado en "Yo"
