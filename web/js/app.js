@@ -371,7 +371,25 @@ function ajustarLetra() {
   poner(1); let k = 1, n = necesario();
   for (let i = 0; i < 3 && n > disponible && k > AJUSTE_MIN; i++) { k = Math.max(AJUSTE_MIN, +(k * disponible / n * 0.98).toFixed(3)); poner(k); n = necesario(); }
 }
-const transpBanda = id => (estado.tonos && estado.tonos[id]) || 0;   // tono de la banda: lo fija el director, lo ven todos
+// Tono por defecto de la canción (Cristhian, 23-sep): el último tono que fija el director se guarda en la canción como
+// {transposicion: N} (semitonos respecto al original de la hoja) y es el punto de partida cuando el estado en vivo no trae uno
+// (cola borrada, estado reiniciado, setlist cargado de nuevo). Mientras el estado en vivo tenga tono, ese manda.
+const transpGuardada = id => { const c = id === mostrando.id ? mostrando.cancion : id === previa.id ? previa.cancion : null; const t = c && c.meta ? parseInt(c.meta.transposicion, 10) : NaN; return Number.isFinite(t) ? Math.max(-11, Math.min(11, t)) : 0; };
+const transpBanda = id => (estado.tonos && id in estado.tonos) ? estado.tonos[id] : transpGuardada(id);   // tono de la banda: lo fija el director, lo ven todos
+function conTransposicion(cho, t) { // pone o quita la línea {transposicion: N} en la cabecera, sin tocar el resto
+  const L = cho.replace(/\r/g, '').split('\n'); const i = L.findIndex(l => /^\{\s*transposicion\s*:/i.test(l));
+  if (!t) { if (i >= 0) L.splice(i, 1); return L.join('\n'); }
+  const linea = `{transposicion: ${t}}`; if (i >= 0) { L[i] = linea; return L.join('\n'); }
+  let j = 0; while (j < L.length && META_CAB.test(L[j])) j++; L.splice(j, 0, linea); return L.join('\n');
+}
+let tGuardarTono = null;
+function guardarTonoEnCancion(id, t) { // con retraso: varios toques seguidos de + / − escriben la canción una sola vez
+  clearTimeout(tGuardarTono);
+  tGuardarTono = setTimeout(async () => {
+    try { const cho = await obtenerCho(id); const nuevo = conTransposicion(cho, t); if (nuevo === cho) return; await datos.guardarCancion(id, nuevo); diag('tono-guardado', `${id} ${t > 0 ? '+' : ''}${t}`); }
+    catch (e) { aviso('el tono quedó en vivo, no en la canción'); diag('tono-error', `${id} ${e && e.message}`); }
+  }, 1500);
+}
 const cejillaPersonal = id => (perfil.cejilla || perfil.instrumento === 'guitarra') ? (prefs.cejilla[id] ?? 0) : 0;
 function pintar() {
   const c = mostrando.cancion; if (!c) return;
@@ -610,7 +628,9 @@ function cambiarTonoBanda(delta) {
   const id = mostrando.id; if (!id || rol !== 'director') return;
   const t = Math.max(-11, Math.min(11, transpBanda(id) + delta));
   estado.tonos = estado.tonos || {}; if (t === 0) delete estado.tonos[id]; else estado.tonos[id] = t;
+  for (const c of [mostrando.id === id ? mostrando.cancion : null, previa.id === id ? previa.cancion : null]) if (c && c.meta) { if (t) c.meta.transposicion = String(t); else delete c.meta.transposicion; }
   pintar(); enviar({ tipo: 'tono', cancion: id, transp: t });
+  guardarTonoEnCancion(id, t); // y queda como tono por defecto de la canción
 }
 $('#tr-menos').onclick = () => cambiarTonoBanda(-1);
 $('#tr-mas').onclick = () => cambiarTonoBanda(1);
@@ -942,7 +962,7 @@ async function cargarInfo() {
 // ---------- edición de canción (director, desde "Canciones") ----------
 const editor = { id: null, cho: '', selIni: null, selFin: null, arreglo: [], renombrar: null, mixAbiertos: new Set(), esMix: false, mixVacio: false };
 const NOMBRES_ESTANDAR = ['Intro', 'Estrofa 1', 'Estrofa 2', 'Estrofa 3', 'Pre-coro', 'Coro', 'Puente', 'Solo', 'Interludio', 'Final'];
-const META_CAB = /^\{\s*(titulo|título|artista|tono|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género|importada)\s*:/i;
+const META_CAB = /^\{\s*(titulo|título|artista|tono|transposicion|cejilla|estado|compositor|afinacion|afinación|fuente|arreglo|tipo|genero|género|importada)\s*:/i;
 const RE_SEC = /^\{\s*secci[oó]n\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_PARTE = /^\{\s*parte\s*:\s*(.*?)\s*\}\s*$/i;
 const RE_NOTA = /^\{\s*(nota|comentario|c)\s*:\s*(.*?)\s*\}\s*$/i;
