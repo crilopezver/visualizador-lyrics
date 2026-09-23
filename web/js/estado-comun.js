@@ -19,7 +19,7 @@ export function aplicarMensaje(st, msg, rol, clienteId = null) {
     case 'vivo': {
       if (!puedeMoverVivo(st, rol)) return false;
       st.vivo.por = clienteId; // quién movió: ese cliente ignora su propio eco
-      if (msg.cancion !== undefined) { recordarVivo(st); ponerEnVivo(st, msg.cancion, clienteId); }
+      if (msg.cancion !== undefined) { if (!(msg.reenvio && st.vivo.cancion === msg.cancion)) recordarVivo(st); ponerEnVivo(st, msg.cancion, clienteId); } // reenvío de la misma canción: sube la carga (todos recargan) sin duplicarla en el historial
       if (typeof msg.seccion === 'number' && msg.seccion >= 0) { st.vivo.seccion = Math.floor(msg.seccion); st.vivo.frac = 0; }
       if (typeof msg.frac === 'number') st.vivo.frac = Math.max(0, Math.min(1, msg.frac));
       st.vivo.paso = ['seccion', 'pagina', 'lineas'].includes(msg.paso) ? msg.paso : 'deslizar';

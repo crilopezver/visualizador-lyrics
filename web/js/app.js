@@ -48,7 +48,7 @@ let modo = 'siguiendo';          // 'siguiendo' | 'libre' | 'lider'
 // ---------- registro de diagnóstico (Cristhian, 18-sep, fila 229) ----------
 // Cada celular anota en localStorage sus últimos eventos: conexión, estado del vivo recibido, cambios de modo, envíos y pantalla.
 // Sirve para entender una desincronización después de un toque. No sale del celular salvo que alguien lo comparta desde "Yo".
-const DIAG_MAX = 400;
+const DIAG_MAX = 2500; // 400 eran 35 min en la Mac en Arcadia (fila 244)
 let diagLista = (() => { try { return JSON.parse(localStorage.getItem('diag') || '[]'); } catch { return []; } })();
 const diagUlt = {}; // eventos frecuentes (posiciones del vivo): se anota uno cada 3 s y se cuenta cuántos hubo entre medio
 function diag(ev, detalle = '', clave = null) {
@@ -195,10 +195,13 @@ function conectar() {
 function programarReintento() { diag('reintento', `en ${Math.round(reintento)} ms`, 'reintento'); setTimeout(conectar, reintento); reintento = Math.min(reintento * 1.6, 8000); }
 
 // ---------- estado compartido ----------
+let ultimaPresencia = null; // para anotar en el diagnóstico solo los cambios de quién está conectado (fila 244)
 function aplicarEstado(e) {
   const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
   const cargaAntes = estado.vivo.carga;
-  diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado:' + ((e.vivo || {}).cancion || '-')); // cada cambio de canción se anota; las posiciones dentro de la misma se resumen
+  diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0} cola=${(e.siguiente || []).length}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado:' + ((e.vivo || {}).cancion || '-')); // cada cambio de canción se anota; las posiciones dentro de la misma se resumen
+  const presencia = (e.conectados || []).map(c => `${c.nombre || '?'}${c.rol && c.rol !== 'musico' ? '(' + c.rol + ')' : ''}`).sort().join(', ');
+  if (presencia !== ultimaPresencia) { ultimaPresencia = presencia; diag('conectados', presencia || 'nadie'); }
   estado = e;
   if (!Array.isArray(e.historial)) e.historial = [];
   if (!e.propuestas) e.propuestas = {};
@@ -561,8 +564,17 @@ $('#btn-volver').onclick = () => { cambiarModo(puedeMover() ? 'lider' : 'siguien
 $('#lider-prev').onclick = () => moverSeccion(-1);
 $('#lider-next').onclick = () => moverSeccion(1);
 // sin conexión, ▶▶ y ◀◀ (y toda la cola) se aplican a la copia de este celular por `enviar` → `aplicarLocal`; al volver la red, el servidor manda
-$('#lider-pasar').onclick = () => { if (!estado.siguiente.length) return aviso('cola vacía'); enviar({ tipo: 'siguiente', accion: 'pasar' }); };
-$('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) return aviso('no hay canción anterior'); enviar({ tipo: 'siguiente', accion: 'anterior' }); };
+$('#lider-pasar').onclick = () => { if (!estado.siguiente.length) { diag('rechazo', 'pasar: cola vacía'); return aviso('cola vacía'); } enviar({ tipo: 'siguiente', accion: 'pasar' }); };
+$('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) { diag('rechazo', 'anterior: sin canción anterior'); return aviso('no hay canción anterior'); } enviar({ tipo: 'siguiente', accion: 'anterior' }); };
+// "Poner esto en vivo para todos" (fila 244, tras Arcadia): quien controla vuelve a escribir la canción y la posición que ve como estado
+// compartido, con versión nueva, para que cualquiera que se haya quedado atrás recargue. Es la salida de emergencia cuando el vivo no se mueve.
+$('#lider-reenviar').onclick = () => {
+  if (!mostrando.id) return aviso('no hay canción en pantalla');
+  if (!conectado) return aviso('sin conexión: no se puede reenviar');
+  diag('reenviar', `${mostrando.id} s${mostrando.seccion} f${Number(mostrando.frac || 0).toFixed(2)}`);
+  enviar({ tipo: 'vivo', cancion: mostrando.id, seccion: mostrando.seccion, frac: mostrando.frac || 0, paso: perfil.paso, reenvio: true });
+  aviso('vivo reenviado a todos');
+};
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
 document.addEventListener('keydown', ev => {
