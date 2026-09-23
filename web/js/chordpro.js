@@ -49,8 +49,8 @@ export function expandir(cancion, resolverParte = () => null) {
     if (r) {
       const t = s.parte.transp || 0; let lineas = r.lineas, tono = r.tono || '';
       if (t) { // la parte se toca en otro tono dentro del mix: acordes transpuestos al expandir, la canción original no cambia
-        tono = r.tono ? tonoTranspuesto(r.tono, t) : ''; const bem = TONOS_BEMOL.has(tono);
-        lineas = r.lineas.map(l => l.segs ? { ...l, segs: l.segs.map(g => ({ ...g, acorde: g.acorde ? transponerAcorde(g.acorde, t, bem) : '' })) } : l);
+        tono = r.tono ? tonoTranspuesto(r.tono, t) : '';
+        lineas = r.lineas.map(l => l.segs ? { ...l, segs: l.segs.map(g => ({ ...g, acorde: g.acorde ? transponerAcorde(g.acorde, t, tono) : '' })) } : l);
       }
       return { nombre: r.nombre || s.parte.seccion, lineas, origen: { id: s.parte.id, titulo: r.titulo, tono, tonoOriginal: r.tono || '', transp: t } };
     }
@@ -79,23 +79,76 @@ export function tituloSeccion(s, i) {
 const NOTAS_SOST = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const NOTAS_BEM = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const INDICE = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11, Cb: 11, 'E#': 5, Fb: 4, 'B#': 0 };
-const TONOS_BEMOL = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
-
-function transponerNota(nota, n, bemoles) {
+// Deletreo por grados (Paper 15, 23-sep-2026): cada fundamental se escribe con la LETRA del grado que le corresponde en el
+// tono destino más la alteración necesaria (nunca dobles). Mayor y menor comparten letras; en la menor, la sensible (11 st)
+// y el 6.º elevado salen sostenidos aunque el tono sea de bemoles (Gm → F#dim), que es la única mezcla legítima.
+const LETRAS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const LETRA_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const OFFSET_GRADO = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6]; // semitonos desde la tónica → letra del grado (I bII II bIII III IV #IV V bVI VI bVII VII)
+const TONOS_MAYOR = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];      // nombres canónicos (Cristhian: Gb, no F#)
+const TONOS_MENOR = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];      // por clase de nota desde C; + 'm' (Cristhian: Ebm, no D#m)
+export function partirTono(tono) { // "Gm" → { pc: 7, letra: 'G', menor: true, sufijo: '' }; "Am7" → sufijo '7'
+  const m = String(tono || '').trim().match(/^([A-G])(#|b)?\s*(m(?!aj))?(.*)$/i); if (!m) return null;
+  const letra = m[1].toUpperCase(), pc = INDICE[letra + (m[2] || '')]; if (pc === undefined) return null;
+  return { pc, letra, menor: !!m[3], sufijo: m[4] || '' };
+}
+export const nombreCanonico = (pc, menor) => menor ? TONOS_MENOR[pc] + 'm' : TONOS_MAYOR[pc];
+const esTonoBemol = tono => { const k = partirTono(tono); return !!k && nombreCanonico(k.pc, k.menor).includes('b'); };
+function deletrearEnTono(pc, tono) {
+  const k = partirTono(tono); if (!k) return NOTAS_SOST[pc];
+  const dist = ((pc - k.pc) % 12 + 12) % 12;
+  const letra = LETRAS[(LETRAS.indexOf(k.letra) + OFFSET_GRADO[dist]) % 7];
+  let alt = ((pc - LETRA_PC[letra]) % 12 + 12) % 12; if (alt > 6) alt -= 12;
+  if (Math.abs(alt) <= 1) return letra + (alt === 1 ? '#' : alt === -1 ? 'b' : '');
+  return (esTonoBemol(tono) ? NOTAS_BEM : NOTAS_SOST)[pc]; // saldría doble alteración: nombre enarmónico de la familia del tono
+}
+// `contexto`: el tono destino ("Gm") para deletrear por grados; o un booleano (bemoles sí/no) como antes, si no hay tono.
+function transponerNota(nota, n, contexto) {
   const i = INDICE[nota]; if (i === undefined) return nota;
   const j = ((i + n) % 12 + 12) % 12;
-  return (bemoles ? NOTAS_BEM : NOTAS_SOST)[j];
+  if (typeof contexto === 'string' && contexto) return deletrearEnTono(j, contexto);
+  return (contexto === true ? NOTAS_BEM : NOTAS_SOST)[j];
 }
-export function transponerAcorde(acorde, n, bemoles = false) {
-  if (!n) return acorde;
+export function transponerAcorde(acorde, n, contexto = '') {
+  if (!n) return acorde; // a transposición 0 no se reescribe nada: la hoja original se respeta tal cual
   // conserva paréntesis, asterisco, cualidad y bajo: (D) Am7* C/E
-  return acorde.replace(/([A-G](?:#|b)?)/g, (_, nota) => transponerNota(nota, n, bemoles));
+  return acorde.replace(/([A-G](?:#|b)?)/g, (_, nota) => transponerNota(nota, n, contexto));
 }
 export function tonoTranspuesto(tono, n) {
   if (!tono) return '';
-  const m = tono.match(/^([A-G](?:#|b)?)(.*)$/); if (!m) return tono;
-  const bem = TONOS_BEMOL.has(tono);
-  return transponerNota(m[1], n, bem) + m[2];
+  const k = partirTono(tono); if (!k) return tono;
+  if (!n) return tono; // a 0 se muestra como lo escribió la hoja
+  return nombreCanonico(((k.pc + n) % 12 + 12) % 12, k.menor) + k.sufijo;
+}
+// Tono deducido (Paper 15; 472 de 655 hojas no traen {tono}): coincidencia de los acordes con los diatónicos de cada uno de los
+// 24 tonos (mayor: I ii iii IV V vi vii°; menor: natural + V mayor y vii° de la armónica), ponderada por frecuencia. Desempate
+// entre relativas (regla de Cristhian): si aparece la sensible de la menor —su V mayor— es menor, porque una mayor no altera su
+// propio V; si aparece el V de la mayor y ningún V de la menor, es mayor; si no, deciden el primer y el último acorde.
+const DIAT_MAYOR = [[0, 'M'], [2, 'm'], [4, 'm'], [5, 'M'], [7, 'M'], [9, 'm'], [11, 'dim']];
+const DIAT_MENOR = [[0, 'm'], [2, 'dim'], [3, 'M'], [5, 'm'], [7, 'm'], [7, 'M'], [8, 'M'], [10, 'M'], [11, 'dim']];
+export function calidadAcorde(acorde) { // 'M' | 'm' | 'dim' | null, de la fundamental sin bajo ni paréntesis
+  const m = String(acorde || '').replace(/^\(|\)$/g, '').match(/^([A-G](?:#|b)?)(.*)$/); if (!m) return null;
+  const pc = INDICE[m[1]]; if (pc === undefined) return null;
+  const q = m[2].replace(/\/.*$/, '').replace(/\*/g, '');
+  const cal = /^(dim|°|º|m7b5|ø)/.test(q) ? 'dim' : /^m(?!aj)/.test(q) ? 'm' : 'M';
+  return { pc, cal };
+}
+export function deducirTono(cancion) {
+  const acs = []; for (const s of cancion.secciones || []) for (const l of s.lineas || []) if (l.segs) for (const g of l.segs) if (g.acorde) acs.push(g.acorde);
+  const L = acs.map(calidadAcorde).filter(Boolean); if (!L.length) return '';
+  let mejor = null;
+  for (let pc = 0; pc < 12; pc++) for (const menor of [false, true]) {
+    const tabla = menor ? DIAT_MENOR : DIAT_MAYOR;
+    const d = c => ((c.pc - pc) % 12 + 12) % 12;
+    let p = 0; for (const c of L) if (tabla.some(([s, cal]) => s === d(c) && cal === c.cal)) p += 1;
+    const vMenor = L.some(c => d(c) === (menor ? 7 : 4) && c.cal === 'M'); // V mayor de la menor (= III mayor de su relativa)
+    const vMayor = L.some(c => d(c) === (menor ? 10 : 7) && c.cal === 'M'); // V de la mayor (= VII de su relativa menor)
+    if (menor && vMenor) p += 2; else if (!menor && vMayor && !vMenor) p += 2;
+    const tonica = c => d(c) === 0 && c.cal === (menor ? 'm' : 'M');
+    if (tonica(L[0])) p += 1.5; if (tonica(L[L.length - 1])) p += 1.5;
+    if (!mejor || p > mejor.p) mejor = { p, pc, menor };
+  }
+  return nombreCanonico(mejor.pc, mejor.menor);
 }
 
 // --- render ---
@@ -127,8 +180,8 @@ function renderLinea(segs, desplazamiento, bemoles, idxLinea = 0) {
 export function renderCancion(cancion, opts = {}) {
   const { transp = 0, cejilla = 0, vista = 'acordes', seccionActual = 0 } = opts;
   const secciones = opts.secciones || cancion.secciones;
-  const bemoles = TONOS_BEMOL.has(tonoTranspuesto(cancion.meta.tono || '', transp - cejilla));
   const desplazamiento = transp - cejilla; // lo que ve el guitarrista con cejilla
+  const bemoles = tonoTranspuesto(cancion.meta.tono || deducirTono(cancion), desplazamiento); // tono destino: contexto para deletrear por grados
   if (vista === 'estructura') {
     const items = secciones.map((s, i) => {
       const acs = []; let reps = '';
@@ -220,8 +273,7 @@ export function textoAChordPro(texto, { titulo = '', artista = '', cejilla = '',
     const primero = (cuerpo.join('\n').match(/\[([A-G](?:#|b)?)(m(?!aj))?/) || []);
     if (!meta.tono && primero[1]) meta.tono = primero[1] + (primero[2] || '');
     if (meta.tono) meta.tono = tonoTranspuesto(meta.tono, cej);
-    const bem = TONOS_BEMOL.has(meta.tono || '');
-    for (let i = 0; i < cuerpo.length; i++) if (!/^\{/.test(cuerpo[i])) cuerpo[i] = cuerpo[i].replace(/\[([^\]]+)\]/g, (_, a) => `[${transponerAcorde(a, cej, bem)}]`);
+    for (let i = 0; i < cuerpo.length; i++) if (!/^\{/.test(cuerpo[i])) cuerpo[i] = cuerpo[i].replace(/\[([^\]]+)\]/g, (_, a) => `[${transponerAcorde(a, cej, meta.tono || '')}]`);
     meta.fuente = `hoja con cejilla en el traste ${cej}; acordes subidos ${cej} semitono${cej > 1 ? 's' : ''}`;
   }
   const cab = [];

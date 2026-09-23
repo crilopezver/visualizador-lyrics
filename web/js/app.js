@@ -1,5 +1,5 @@
 // Visualizador Lyrics — lógica de la app (sin framework).
-import { parsear, renderCancion, tonoTranspuesto, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo, lineaAHoja, hojaACuerpo, esFilaAcordes, tokensDudosos } from './chordpro.js';
+import { parsear, renderCancion, tonoTranspuesto, deducirTono, expandir, nombresArreglo, tituloSeccion, textoAChordPro, eliminarSeccion, palabrasCrudas, eliminarTramo, lineaAHoja, hojaACuerpo, esFilaAcordes, tokensDudosos } from './chordpro.js';
 import { aplicarMensaje } from './estado-comun.js'; // mismas reglas que el servidor: sin conexión se aplican a la copia de este celular (Paper 13)
 import * as datos from './datos.js';                 // copia local de canciones, setlists y notas; sincronización y cambios pendientes
 import * as nube from './nube.js';                   // nube (Supabase): datos por REST y vivo por tiempo real, cuando la app no se sirve desde la Mac
@@ -396,8 +396,8 @@ function pintar() {
   const m = c.meta, id = mostrando.id;
   const transp = transpBanda(id), cejilla = cejillaPersonal(id);
   $('#vivo-titulo').textContent = m.titulo || titulo(id);
-  const tonoBanda = m.tono ? tonoTranspuesto(m.tono, transp) : '';
-  const partes = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${m.tono})` : '') : 'tono sin fijar', m.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean);
+  const tonoBase = m.tono || deducirTono(c); const tonoBanda = tonoBase ? tonoTranspuesto(tonoBase, transp) : ''; // sin {tono} en la hoja: deducido por los acordes (Paper 15)
+  const partes = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${tonoBase})` : '') + (m.tono ? '' : ' · deducido') : 'tono sin fijar', m.estado === 'importada' ? '⚠ sin corregir' : ''].filter(Boolean);
   $('#vivo-sub').textContent = partes.join(' · ');
   $('#tr-valor').textContent = transp > 0 ? '+' + transp : transp; $('#cj-valor').textContent = cejilla;
   $('#vivo-tono-info').textContent = cejilla ? `→ acordes en ${m.tono ? tonoTranspuesto(m.tono, transp - cejilla) : (transp - cejilla) + ' st'}` : '';
@@ -528,8 +528,8 @@ function pintarPrevia() {
   if (!c) { $('#previa-titulo').textContent = 'Nada en vista previa'; $('#previa-sub').textContent = 'Toca “Ver” en Canciones, en la cola o en un setlist.'; $('#previa-acciones').hidden = true; art.innerHTML = ''; return; }
   const m = c.meta, id = previa.id, transp = transpBanda(id), cejilla = cejillaPersonal(id);
   $('#previa-titulo').textContent = m.titulo || titulo(id);
-  const tonoBanda = m.tono ? tonoTranspuesto(m.tono, transp) : '';
-  $('#previa-sub').textContent = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${m.tono})` : '') : 'tono sin fijar', cejilla ? `cejilla ${cejilla}` : '', 'vista previa: no cambia el vivo'].filter(Boolean).join(' · ');
+  const tonoBase = m.tono || deducirTono(c); const tonoBanda = tonoBase ? tonoTranspuesto(tonoBase, transp) : '';
+  $('#previa-sub').textContent = [m.artista, tonoBanda ? 'Tono ' + tonoBanda + (transp ? ` (orig. ${tonoBase})` : '') + (m.tono ? '' : ' · deducido') : 'tono sin fijar', cejilla ? `cejilla ${cejilla}` : '', 'vista previa: no cambia el vivo'].filter(Boolean).join(' · ');
   $('#previa-acciones').hidden = false; $('#previa-editar').hidden = rol !== 'director'; $('#previa-vivo').hidden = !puedeMover(); $('#previa-cola').hidden = !puedeCola(); $('#previa-siguiente').hidden = !puedeCola();
   art.className = 'lienzo vista-' + perfil.vista;
   art.innerHTML = renderCancion(c, { transp, cejilla, vista: perfil.vista, seccionActual: -1, secciones: previa.expandidas });
