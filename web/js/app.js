@@ -26,10 +26,10 @@ let indice = [];                 // [{id,titulo,artista,tono,...}]
 const ESTADO_VACIO = { vivo: { cancion: null, seccion: 0, frac: 0 }, siguiente: [], historial: [], controlCantante: false, tonos: {}, propuestas: {}, conectados: [] };
 // Copia local del estado (Paper 13, fila 214): sin conexión este celular sigue con la cola, el historial y el vivo que tenía;
 // al reconectar manda el servidor. `divergio`: la cola se armó sin conexión (cantante o director) y pasa por aprobación al volver.
-const local = cargar('estadoLocal', { divergio: false, estado: null });
+const local = cargar('estadoLocal', { divergio: false, vivoDivergio: false, estado: null }); // vivoDivergio: quien controla cambió de canción sin conexión (24-sep, fila 244 punto 5)
 let estado = local.estado ? { ...ESTADO_VACIO, ...local.estado, propuestas: {}, conectados: [] } : { ...ESTADO_VACIO };
 let rol = perfil.rolConfirmado || 'musico'; // último rol confirmado por el servidor: sin conexión vale el mismo (fila 214)
-function guardarLocal() { guardar('estadoLocal', { estado: { vivo: estado.vivo, siguiente: estado.siguiente, historial: estado.historial, controlCantante: estado.controlCantante, tonos: estado.tonos }, divergio: local.divergio }); }
+function guardarLocal() { guardar('estadoLocal', { estado: { vivo: estado.vivo, siguiente: estado.siguiente, historial: estado.historial, controlCantante: estado.controlCantante, tonos: estado.tonos }, divergio: local.divergio, vivoDivergio: local.vivoDivergio }); }
 let editorPendiente = null;      // canción cuyo editor estaba abierto al recargar: se reabre tras la bienvenida si el rol es director
 async function restaurarEditor() {
   const id = editorPendiente; if (!id) return; editorPendiente = null;
@@ -113,6 +113,7 @@ function aplicarLocal(msg) {
   const copia = structuredClone({ ...estado, conectados: [] });
   if (!aplicarMensaje(copia, msg, 'director', clienteId)) return aviso('no se pudo');
   if (msg.tipo === 'siguiente' && ['director', 'cantante'].includes(perfil.rolConfirmado)) local.divergio = true; // al reconectar pasa por aprobación
+  if (copia.vivo.cancion && copia.vivo.cancion !== estado.vivo.cancion && ['director', 'cantante'].includes(perfil.rolConfirmado)) local.vivoDivergio = true; // al reconectar, su vivo gana (Cristhian, 24-sep)
   aplicarEstado(copia); guardarLocal();
 }
 // Al reconectar (fila 214): si este celular armó cola sin conexión (cantante o director) y difiere de la compartida, se propone
@@ -133,7 +134,14 @@ function alBienvenida(rolServidor, estadoServidor) {
   conectado = true; rol = rolServidor; if (perfil.rolConfirmado !== rol) { perfil.rolConfirmado = rol; guardar('perfil', perfil); }
   diag('conectado', `rol=${rolServidor} vivo=${(estadoServidor.vivo || {}).cancion || '-'} c${(estadoServidor.vivo || {}).carga || 0}`);
   estuvoSinRed = false; cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'conexión'); // al conectar o tras una caída, todos vuelven al vivo (fila 214)
-  reconciliar(estadoServidor); actualizarConexion(); aplicarEstado(estadoServidor); restaurarEditor();
+  reconciliar(estadoServidor); actualizarConexion();
+  // Tu vivo gana (Cristhian, 24-sep; Arcadia, fila 242 punto 3): si quien controla cambió de canción sin conexión, al reconectar
+  // reenvía lo que ve como estado compartido (mismo camino que 📡) en vez de aceptar en silencio lo que quedó en el servidor.
+  const gana = local.vivoDivergio && estado.vivo.cancion && (rol === 'director' || (rol === 'cantante' && estadoServidor.controlCantante));
+  const mio = gana && estado.vivo.cancion !== (estadoServidor.vivo || {}).cancion ? { tipo: 'vivo', cancion: estado.vivo.cancion, seccion: mostrando.id === estado.vivo.cancion ? mostrando.seccion : (estado.vivo.seccion || 0), frac: mostrando.id === estado.vivo.cancion ? (mostrando.frac || 0) : 0, paso: perfil.paso, reenvio: true } : null;
+  if (local.vivoDivergio) { diag('reconexión', mio ? `tu vivo gana: ${mio.cancion} (servidor ${(estadoServidor.vivo || {}).cancion || '-'})` : `vivo local ${gana ? 'igual al servidor' : 'no manda'}`); local.vivoDivergio = false; }
+  aplicarEstado(estadoServidor); restaurarEditor();
+  if (mio) { enviarCrudo(mio); aviso('tu vivo sin conexión se reenvió a todos'); }
   setTimeout(sincronizarAhora, 800);
 }
 // Nube: clave de banda → rol por PIN → canal del vivo (presencia, difusión, estado con versión)
@@ -156,6 +164,12 @@ async function conectarNube() {
 function aviso(t) { const c = $('#conexion-texto'); const antes = c.textContent; c.textContent = t; setTimeout(() => { if (c.textContent === t) actualizarConexion(); }, 2500); }
 
 // ---------- pestañas ----------
+// ↩ Volver al vivo: en navegación libre y, para todos los roles, en cualquier pestaña que no sea En vivo (Cristhian, 18-sep y 24-sep, pendiente 8h)
+function actualizarVolver() {
+  const fuera = !$('#vista-vivo').classList.contains('activa');
+  document.body.classList.toggle('fuera-vivo', fuera);
+  $('#btn-volver').hidden = !(modo === 'libre' || fuera);
+}
 function irA(vista) {
   // la pestaña activa se recuerda en este dispositivo para volver a ella al recargar (Cristhian, 11-sep, fila 167)
   if (vista !== 'editor' && vista !== 'importar') { prefs.vista = vista; prefs.editorId = null; guardar('prefs', prefs); }
@@ -164,6 +178,7 @@ function irA(vista) {
   if (vista === 'setlists') cargarSetlists();
   if (vista === 'ajustes') { cargarInfo(); cargarIntegrantes(); renderDiag(); }
   if (vista === 'vivo') enfocarPedal();
+  actualizarVolver();
   diag('pestaña', vista);
 }
 $$('#tabs button').forEach(b => b.onclick = () => irA(b.dataset.vista));
@@ -256,7 +271,7 @@ function actualizarControles() {
   $('#controles-lider').hidden = !mostrarBarra;
   $('#lider-reenviar').hidden = !lider; // 📡 vive arriba, junto a la píldora, solo para quien controla con conexión (Cristhian, 24-sep: en la barra tapaba los botones de navegación)
   document.body.classList.toggle('con-barra', puedeMover() && conectado && (rol === 'director' || perfil.botones !== false)); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
-  $('#btn-volver').hidden = modo !== 'libre';
+  actualizarVolver();
   const p = $('#vivo-modo');
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');
   p.textContent = sinRed ? 'sin conexión · sigues por tu cuenta: ▶▶ pasa tu cola' : modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · ' + textoCopia();
