@@ -43,6 +43,7 @@ h3 small{font-weight:400;font-size:.8rem;color:var(--tenue);margin-left:.4rem}
 #conexion .punto{width:9px;height:9px;border-radius:50%;background:var(--mal)}
 #conexion.ok .punto{background:var(--ok)}
 #conexion.libre .punto{background:var(--acorde)}
+#conexion.ok.viejo .punto{background:var(--acorde)} /* canal abierto pero sin intercambio desde hace 30 s: no es verde (fila 244) */
 
 main{flex:1;padding:.6rem .8rem calc(6rem + env(safe-area-inset-bottom))}
 .vista{display:none}.vista.activa{display:block}
@@ -129,6 +130,12 @@ ol.lista li::before{counter-increment:n;content:counter(n);color:var(--tenue);mi
 /* cuál sigue */
 .sigue-cab{color:#8fb4ff;font-size:.9rem;margin-top:.2rem}
 .sigue-cab:empty{display:none}
+.quienes-cab{color:var(--tenue);font-size:.8rem;margin-top:.15rem}
+.quienes-cab:empty{display:none}
+.latido{font-size:.75rem;color:var(--tenue);white-space:nowrap}
+.latido:empty{display:none}
+.latido.viejo{color:var(--acorde);font-weight:700}
+.latido.mal{color:var(--mal);font-weight:700}
 .lienzo .sigue-card{margin:2rem 0 1rem;padding:1rem;border:1px dashed var(--borde);border-radius:14px;text-align:center;color:var(--tenue);font-size:.9em}
 .lienzo .sigue-card b{display:block;color:var(--texto);font-size:1.15em;margin:.3em 0 .6em}
 .lienzo .sigue-card button{font-size:1em;padding:.7rem 1.2rem;background:var(--azul);border-color:var(--azul)}

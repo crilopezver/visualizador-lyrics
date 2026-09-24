@@ -40,6 +40,7 @@ async function restaurarEditor() {
 let ws = null, conectado = false, reintento = 1000;
 let vivoNube = null; // conexión al vivo por la nube (nube.js) cuando usarNube
 let estuvoSinRed = false; // hubo conexión y se perdió: al reconectar se vuelve a seguir al vivo aunque se haya navegado por cuenta propia
+let ultimoOk = 0; // último intercambio con el servidor que funcionó (mensaje recibido o envío confirmado): lo que muestra el indicador veraz (fila 244, punto 2)
 let ultimoMensaje = 0; // vigilancia: si en 45 s no llega nada del servidor (latido cada 20 s), la conexión se da por muerta y se reconecta (Paper 10, hallazgo 3)
 setInterval(() => { if (conectado && ultimoMensaje && Date.now() - ultimoMensaje > 45000) { aviso('reconectando…'); try { ws.close(); } catch {} } }, 10000);
 const clienteId = (() => { try { let c = localStorage.getItem('clienteId'); if (!c) { c = Math.random().toString(36).slice(2, 12); localStorage.setItem('clienteId', c); } return c; } catch { return Math.random().toString(36).slice(2, 12); } })();
@@ -100,7 +101,7 @@ async function api(ruta, opciones = {}) {
 }
 function enviar(msg) {
   const esPos = msg.tipo === 'vivo' && msg.cancion === undefined; diag('envío', resumenMsg(msg), esPos ? 'envio-pos' : null);
-  if (usarNube) { if (conectado && vivoNube) { vivoNube.enviar(msg, rol).then(ok => { if (!ok) { aviso('sin permiso'); diag('envío-rechazado', resumenMsg(msg)); } }).catch(e => { aviso('no llegó a la nube'); diag('envío-error', `${resumenMsg(msg)} ${e && e.message}`); }); return; } diag('envío-local', 'sin conexión con la nube'); return aplicarLocal(msg); }
+  if (usarNube) { if (conectado && vivoNube) { vivoNube.enviar(msg, rol).then(ok => { if (!ok) { aviso('sin permiso'); diag('envío-rechazado', resumenMsg(msg)); } else ultimoOk = Date.now(); }).catch(e => { aviso('no llegó a la nube'); diag('envío-error', `${resumenMsg(msg)} ${e && e.message}`); }); return; } diag('envío-local', 'sin conexión con la nube'); return aplicarLocal(msg); }
   if (ws && ws.readyState === 1 && conectado) return ws.send(JSON.stringify(msg));
   diag('envío-local', 'sin conexión con la Mac'); aplicarLocal(msg);
 }
@@ -155,7 +156,7 @@ async function conectarNube() {
     if (vivoNube) { vivoNube.cerrar(); vivoNube = null; }
     vivoNube = nube.conectarVivo({
       perfil, clienteId,
-      alEstado: e => { if (conectado) aplicarEstado(e); },
+      alEstado: e => { ultimoOk = Date.now(); if (conectado) aplicarEstado(e); },
       alConectado: u => { reintento = 1000; alBienvenida(rolNube, { ...(u.datos || {}), conectados: [] }); },
       alCaida: e => { diag('caída', `nube ${e && e.message || ''} (estaba ${conectado ? 'conectado' : 'sin conexión'})`); const habia = conectado; conectado = false; if (habia) estuvoSinRed = true; actualizarConexion(); actualizarControles(); if (vivoNube) { vivoNube.cerrar(); vivoNube = null; } programarReintento(); },
     });
@@ -188,7 +189,21 @@ function actualizarConexion() {
   const c = $('#conexion');
   c.classList.toggle('ok', conectado); c.classList.toggle('libre', !conectado);
   $('#conexion-texto').textContent = conectado ? (rol === 'musico' ? 'conectado' : rol) : 'sin conexión';
+  if (!conectado) $('#vivo-quienes').textContent = '';
+  pintarLatido();
 }
+// Indicador veraz (fila 244, punto 2; Arcadia: el verde solo decía que el canal estaba abierto): hace cuánto fue el último
+// intercambio que funcionó y qué versión del estado tiene este aparato. Si el tiempo crece o dos celulares no coinciden, no están sincronizados.
+function pintarLatido() {
+  const el = $('#vivo-latido'), c = $('#conexion');
+  if (!conectado || !ultimoOk) { el.textContent = ''; el.className = 'latido'; c.classList.remove('viejo'); return; }
+  const seg = Math.round((Date.now() - ultimoOk) / 1000);
+  const v = estado.version !== undefined ? 'v' + estado.version : 'c' + (estado.vivo.carga || 0);
+  el.textContent = `↔ ${seg < 5 ? 'ahora' : 'hace ' + seg + ' s'} · ${v}`;
+  el.className = 'latido' + (seg >= 60 ? ' mal' : seg >= 30 ? ' viejo' : '');
+  c.classList.toggle('viejo', seg >= 30);
+}
+setInterval(pintarLatido, 1000);
 function conectar() {
   if (usarNube) return conectarNube();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -196,7 +211,7 @@ function conectar() {
   ws.onopen = () => { reintento = 1000; ws.send(JSON.stringify({ tipo: 'hola', nombre: perfil.nombre || 'anónimo', instrumento: perfil.instrumento, rol: perfil.rol, pin: perfil.pin, clienteId })); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
-    ultimoMensaje = Date.now();
+    ultimoMensaje = Date.now(); ultimoOk = ultimoMensaje;
     if (m.tipo === 'latido') return;
     if (m.tipo === 'bienvenida') alBienvenida(m.rol, m.estado);
     else if (m.tipo === 'estado') aplicarEstado(m.estado);
@@ -217,6 +232,8 @@ function aplicarEstado(e) {
   diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0} cola=${(e.siguiente || []).length}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado:' + ((e.vivo || {}).cancion || '-')); // cada cambio de canción se anota; las posiciones dentro de la misma se resumen
   const presencia = (e.conectados || []).map(c => `${c.nombre || '?'}${c.rol && c.rol !== 'musico' ? '(' + c.rol + ')' : ''}`).sort().join(', ');
   if (presencia !== ultimaPresencia) { ultimaPresencia = presencia; diag('conectados', presencia || 'nadie'); }
+  // presencia visible en el vivo (fila 244, punto 3): quién está conectado ahora, sin ir a "Yo"
+  $('#vivo-quienes').textContent = conectado && (e.conectados || []).length ? '👥 ' + e.conectados.map(c => `${c.nombre || '?'}${c.rol === 'director' ? ' (dir.)' : c.rol === 'cantante' ? ' (cant.)' : ''}`).sort().join(' · ') : '';
   estado = e;
   if (!Array.isArray(e.historial)) e.historial = [];
   if (!e.propuestas) e.propuestas = {};
