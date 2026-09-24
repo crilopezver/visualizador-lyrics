@@ -9,7 +9,10 @@ LOG="/tmp/visualizador-lyrics.log"
 vivo() { curl -s -m 1 "http://localhost:$PUERTO/api/info" >/dev/null 2>&1; }
 if ! vivo; then
   cd "$APP" || exit 1
-  nohup "$NODE" server/index.js >> "$LOG" 2>&1 &
+  # caffeinate -i: mientras el servidor corra, la Mac no entra en reposo por inactividad (pmset sleep 1: se dormía un minuto
+  # después de apagar la pantalla y el servidor y la sincronización con la nube morían; pendiente 7e, 24-sep). La tapa cerrada
+  # sigue durmiendo la Mac: en el toque, tapa abierta.
+  nohup /usr/bin/caffeinate -i "$NODE" server/index.js >> "$LOG" 2>&1 &
   for i in $(seq 1 20); do vivo && break; sleep 0.25; done
 fi
 if vivo; then
