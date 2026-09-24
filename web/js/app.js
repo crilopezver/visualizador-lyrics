@@ -254,6 +254,7 @@ function actualizarControles() {
   const sinRed = !conectado && !!estado.vivo.cancion; // sin conexión (se perdió, o la app se abrió sin servidor): cada uno sigue con su copia y su cola (Paper 10, hallazgo 7; Paper 13)
   const mostrarBarra = (lider && (rol === 'director' || perfil.botones !== false)) || sinRed; // el director siempre; el cantante puede ocultarla; sin red, todos
   $('#controles-lider').hidden = !mostrarBarra;
+  $('#lider-reenviar').hidden = !lider; // 📡 vive arriba, junto a la píldora, solo para quien controla con conexión (Cristhian, 24-sep: en la barra tapaba los botones de navegación)
   document.body.classList.toggle('con-barra', puedeMover() && conectado && (rol === 'director' || perfil.botones !== false)); // la barra del líder existe aunque esté en libre: el botón flotante se acomoda encima
   $('#btn-volver').hidden = modo !== 'libre';
   const p = $('#vivo-modo');

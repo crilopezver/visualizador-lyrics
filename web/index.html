@@ -38,6 +38,7 @@
       <div id="propuestas-vivo" class="caja propuestas" hidden></div>
       <div id="vivo-herr">
         <span id="vivo-modo" class="pill modo-siguiendo">siguiendo al vivo</span>
+        <button id="lider-reenviar" class="ctl-btn" hidden title="Poner esto en vivo para todos: vuelve a escribir la canción y la posición que ves como estado compartido, por si alguien se quedó atrás">📡 Reenviar</button>
         <label class="ctl" id="ctl-tono">Tono <button id="tr-menos">−</button><span id="tr-valor">0</span><button id="tr-mas">+</button> <span id="vivo-tono-info"></span></label>
         <button id="btn-tono-orig" class="ctl-btn" hidden title="Fijar o corregir el tono original de la canción">✎ tono orig.</button>
         <label class="ctl" id="ctl-cejilla">Cejilla <button id="cj-menos">−</button><span id="cj-valor">0</span><button id="cj-mas">+</button></label>
@@ -53,11 +54,11 @@
     </div>
     <div id="controles-lider" hidden>
       <button id="btn-cantante" class="mini" hidden title="El cantante puede manejar el vivo (un solo control a la vez). Se guarda al instante.">🎤</button>
+      <!-- orden de reproductor (Cristhian, 24-sep): canción en los extremos (◀◀ ▶▶), sección en el centro (▲ ▼) -->
       <button id="lider-anterior" class="mini" title="Canción anterior: vuelve a la última tocada y la actual pasa al frente de la cola">◀◀</button>
       <button id="lider-prev">▲ atrás</button>
-      <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
-      <button id="lider-reenviar" class="mini" title="Poner esto en vivo para todos: vuelve a escribir la canción y la posición que ves como estado compartido, por si alguien se quedó atrás">📡 Reenviar</button>
       <button id="lider-next">▼ avanzar</button>
+      <button id="lider-pasar" title="La primera de la cola pasa al vivo">▶▶ Siguiente canción</button>
     </div>
   </section>
 
