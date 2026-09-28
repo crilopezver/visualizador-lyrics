@@ -16,7 +16,7 @@ const prefs = cargar('prefs', { tam: 1.25, transp: {}, cejilla: {}, orden: 'impo
 // Fila 214: primero la Mac (la app servida desde ella, por http), si no la nube (la app publicada por https; ?nube=1 para probar desde la Mac).
 { const p = new URLSearchParams(location.search); if (p.get('banda')) { perfil.claveBanda = p.get('banda'); guardar('perfil', perfil); } if (p.get('nube') === '1') { prefs.nube = true; guardar('prefs', prefs); } if (p.get('nube') === '0') { prefs.nube = false; guardar('prefs', prefs); } } // enlace de instalación con la clave de banda
 const usarNube = nube.disponible() && (location.protocol === 'https:' || prefs.nube === true);
-if (usarNube) { datos.usarFuente(nube.fuenteNube); if (perfil.claveBanda) nube.iniciar(perfil.claveBanda); } // la clave va en cada petición desde el primer momento
+if (usarNube) { datos.usarFuente(nube.fuenteNube); nube.usarRed(datos.pedir); if (perfil.claveBanda) nube.iniciar(perfil.claveBanda); } // la clave va en cada petición desde el primer momento
 // Abierto desde el panel de la Mac (?director=1): esta Mac es del director y el servidor no le pide PIN por localhost.
 if (new URLSearchParams(location.search).get('director') === '1') {
   perfil.rol = 'director'; if (!perfil.nombre) perfil.nombre = 'Director (Mac)'; guardar('perfil', perfil);
@@ -132,7 +132,7 @@ function reconciliar(servidor) {
 }
 // Al quedar conectado (Mac o nube): rol confirmado, todos al vivo, cola sin conexión → propuesta, el servidor manda, sincronización
 function alBienvenida(rolServidor, estadoServidor) {
-  conectado = true; rol = rolServidor; if (perfil.rolConfirmado !== rol) { perfil.rolConfirmado = rol; guardar('perfil', perfil); }
+  conectado = true; datos.redVolvio(); rol = rolServidor; if (perfil.rolConfirmado !== rol) { perfil.rolConfirmado = rol; guardar('perfil', perfil); }
   diag('conectado', `rol=${rolServidor} vivo=${(estadoServidor.vivo || {}).cancion || '-'} c${(estadoServidor.vivo || {}).carga || 0}`);
   estuvoSinRed = false; cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'conexión'); // al conectar o tras una caída, todos vuelven al vivo (fila 214)
   reconciliar(estadoServidor); actualizarConexion();
@@ -171,7 +171,27 @@ function actualizarVolver() {
   document.body.classList.toggle('fuera-vivo', fuera);
   $('#btn-volver').hidden = !(modo === 'libre' || fuera);
 }
-function irA(vista) {
+// Atrás del teléfono (28-sep): cada cambio de pestaña o pantalla queda en el historial del navegador y "atrás" vuelve al paso
+// anterior en vez de cerrar la app. El editor y el importador no se reabren desde el historial: atrás desde ahí lleva a Canciones.
+let historialListo = false;
+function anotarHistorial(est) {
+  try {
+    if (!historialListo) return history.replaceState(est, '');
+    const a = history.state || {}; if (a.vista === est.vista && !!a.detalle === !!est.detalle) return;
+    history.pushState(est, '');
+  } catch {}
+}
+window.addEventListener('popstate', ev => {
+  const e = ev.state; if (!e || !e.vista) return;
+  diag('atrás', e.vista + (e.detalle ? ' (detalle)' : ''));
+  if (!$('#nota-panel').hidden) cerrarNota();
+  const destino = e.vista === 'editor' || e.vista === 'importar' ? 'biblioteca' : e.vista;
+  irA(destino, { historial: false });
+  if (destino === 'setlists' && !e.detalle) $('#setlist-detalle').hidden = true;
+  if (destino === 'previa' && prefs.previaId && !previa.id) verLibre(prefs.previaId);
+});
+function irA(vista, { historial = true } = {}) {
+  if (historial) anotarHistorial({ vista });
   // la pestaña activa se recuerda en este dispositivo para volver a ella al recargar (Cristhian, 11-sep, fila 167)
   if (vista !== 'editor' && vista !== 'importar') { prefs.vista = vista; prefs.editorId = null; guardar('prefs', prefs); }
   $$('#tabs button').forEach(b => b.classList.toggle('activa', b.dataset.vista === vista));
@@ -865,10 +885,10 @@ async function abrirSetlist(id) {
       ol.append(li);
     });
     $('#setlist-cargar').hidden = !puedeCola(); $('#setlist-editar').hidden = rol !== 'director';
-    $('#setlist-detalle').hidden = false;
+    $('#setlist-detalle').hidden = false; anotarHistorial({ vista: 'setlists', detalle: true });
   } catch (e) { aviso('error: ' + e.message); }
 }
-$('#setlist-cerrar').onclick = () => { $('#setlist-detalle').hidden = true; };
+$('#setlist-cerrar').onclick = () => { if ((history.state || {}).detalle) history.back(); else $('#setlist-detalle').hidden = true; };
 $('#setlist-editar').onclick = () => { if (setlistAbierto) abrirEditorSetlist(setlistAbierto.id); };
 
 // ---------- editor de setlists (director) ----------
@@ -1897,6 +1917,10 @@ llenarPerfil(); actualizarConexion(); actualizarControles();
 document.documentElement.style.setProperty('--tam', prefs.tam + 'rem');
 datos.configurar({ cabeceras: cabPin, quien: () => perfil.nombre || '', alCambiar: () => { renderCopia(); } });
 datos.cargarEstadoCopia().then(() => { actualizarControles(); renderCopia(); });
+// Copia protegida (28-sep): se pide al navegador almacenamiento persistente, para que el sistema no borre las canciones guardadas
+// si al celular le falta espacio. El navegador puede negarlo; queda anotado en el diagnóstico y a la vista en "Yo".
+let copiaProtegida = null;
+if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(ya => ya || navigator.storage.persist()).then(ok => { copiaProtegida = !!ok; diag('almacenamiento', ok ? 'persistente' : 'no persistente'); renderCopia(); }).catch(() => {});
 // al abrir: primero lo que este celular tenía (vivo, cola, historial) para que se vea aunque no haya servidor; luego se conecta y el servidor manda
 cargarIndice().then(() => { if (local.estado) aplicarEstado(structuredClone(estado)); }).then(conectar);
 // Sincronización (Paper 13, fila 214): al conectar y cada 5 minutos, este celular baja lo que cambió (por versión) y sube lo que
@@ -1921,7 +1945,7 @@ async function renderCopia() {
   try { pend = await datos.pendientes(); conf = await datos.conflictos(); } catch {}
   const cuando = s.sincronizando ? 'sincronizando…' : s.ultimaSync ? `sincronizada ${haceCuanto(s.ultimaSync.t)} (${fechaCorta(new Date(s.ultimaSync.t).toISOString())})` : 'nunca sincronizada: sin conexión no habrá canciones';
   const nombrePend = p => p.tipo === 'nota' ? `nota de ${titulo(p.cancion)}` : p.tipo === 'setlist' ? `setlist ${p.obj.nombre || ''}` : titulo(p.id);
-  el.innerHTML = `<b>${indice.length} canciones</b> · ${esc(cuando)}${pend.length ? `<br>⏳ ${pend.length} cambio${pend.length === 1 ? '' : 's'} por subir: ${esc(pend.map(nombrePend).join(', '))}` : ''}`;
+  el.innerHTML = `<b>${indice.length} canciones</b> · ${esc(cuando)}${copiaProtegida === true ? ' · copia protegida' : copiaProtegida === false ? ' · copia sin proteger (el sistema puede borrarla si falta espacio)' : ''}${pend.length ? `<br>⏳ ${pend.length} cambio${pend.length === 1 ? '' : 's'} por subir: ${esc(pend.map(nombrePend).join(', '))}` : ''}`;
   const c = $('#copia-conflictos'); c.innerHTML = ''; c.hidden = !conf.length;
   if (conf.length) {
     c.innerHTML = '<b>Por resolver en el editor</b> (la Mac y un celular cambiaron la misma canción, o un cambio no se pudo subir):';
@@ -1936,3 +1960,5 @@ if (!perfil.nombre) irA('ajustes');
 else if (prefs.vista === 'editor' && prefs.editorId) { editorPendiente = prefs.editorId; irA('biblioteca'); } // el editor se abre cuando el servidor confirme el rol (bienvenida)
 else if (prefs.vista === 'previa' && prefs.previaId) { cargarIndice().then(() => verLibre(prefs.previaId)); }
 else if (prefs.vista && prefs.vista !== 'editor' && $(`#tabs button[data-vista="${prefs.vista}"]`)) irA(prefs.vista);
+if (!history.state || !history.state.vista) anotarHistorial({ vista: ($('.vista.activa') || { id: 'vista-vivo' }).id.replace('vista-', '') });
+historialListo = true;

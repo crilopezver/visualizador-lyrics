@@ -30,12 +30,35 @@ const kvPut = (k, v) => put('kv', k, v);
 let cfg = { cabeceras: () => ({}), quien: () => '', alCambiar: () => {} };
 export function configurar(c) { cfg = { ...cfg, ...c }; }
 const esFalloDeRed = e => e instanceof TypeError || (e && e.sinRed); // fetch rechaza con TypeError cuando no llega al servidor
+// ---------- red con tiempo límite (28-sep) ----------
+// Una señal colgada (la petición sale y nadie responde) debe contar como sin conexión: sin límite, la app esperaba a la red
+// para siempre y nunca llegaba a leer su copia (reproducido el 28-sep con el servidor congelado: pantalla vacía con 655 canciones
+// guardadas). Lecturas: 3 s si este celular ya tiene una copia sincronizada, 8 s si no; escrituras: 20 s. Tras un fallo, las
+// lecturas de los 15 s siguientes fallan al instante, para trabajar desde la copia sin esperar en cada pantalla. Durante la
+// sincronización (paciente) todo tiene 20 s y no hay fallo al instante. El vivo (estado, PIN) no pasa por aquí.
+let redMalaHasta = 0, tieneCopia = null, paciente = false;
+const hayCopia = () => tieneCopia || (tieneCopia = kvGet('sync', null).then(s => !!s, () => false));
+export function redVolvio() { redMalaHasta = 0; }
+export async function pedir(url, opciones = {}) {
+  const lectura = !opciones.method || opciones.method === 'GET';
+  if (lectura && !paciente && Date.now() < redMalaHasta) throw new TypeError('red sin respuesta');
+  const ms = paciente || !lectura ? 20000 : (await hayCopia()) ? 3000 : 8000;
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opciones, signal: c.signal });
+    const texto = await r.text();
+    redMalaHasta = 0;
+    return { ok: r.ok, status: r.status, statusText: r.statusText, texto };
+  } catch (e) { if (lectura) redMalaHasta = Date.now() + 15000; throw new TypeError(c.signal.aborted ? 'red sin respuesta' : 'sin red'); }
+  finally { clearTimeout(t); }
+}
 async function api(ruta, opciones = {}) {
   let r;
-  try { r = await fetch(ruta, { ...opciones, headers: { 'Content-Type': 'application/json', ...cfg.cabeceras(), ...(opciones.headers || {}) } }); }
+  try { r = await pedir(ruta, { ...opciones, headers: { 'Content-Type': 'application/json', ...cfg.cabeceras(), ...(opciones.headers || {}) } }); }
   catch (e) { const err = new Error('sin conexión'); err.sinRed = true; throw err; }
-  if (!r.ok) { const err = new Error((await r.json().catch(() => ({}))).error || r.statusText); err.http = r.status; throw err; }
-  return r.json();
+  let j = null; try { j = r.texto ? JSON.parse(r.texto) : null; } catch {}
+  if (!r.ok) { const err = new Error((j && j.error) || r.statusText); err.http = r.status; throw err; }
+  return j;
 }
 // Fuente de datos: la Mac (API local) o la nube (nube.js). Misma interfaz; la copia local no distingue (fila 214: primero la Mac, si no la nube).
 const fuenteMac = {
@@ -176,7 +199,7 @@ export async function guardarNota(usuario, cancion, texto) {
 // Devuelve un resumen; si no hay red, { sinRed: true }.
 export async function sincronizar({ todo = false } = {}) {
   if (sincronizando) return { ocupado: true };
-  sincronizando = true; cfg.alCambiar();
+  sincronizando = true; paciente = true; cfg.alCambiar();
   const resumen = { bajadas: 0, subidas: 0, conflictos: 0, borradas: 0 };
   try {
     let lista; try { lista = await fuente.indiceCanciones(); } catch (e) { if (esFalloDeRed(e)) return { sinRed: true }; throw e; }
@@ -234,9 +257,9 @@ export async function sincronizar({ todo = false } = {}) {
       const ids = new Set(sl.map(s => s.id)); for (const k of (await todasClaves('setlists')) || []) if (!ids.has(k) && !esLocal(k)) await del('setlists', k);
       for (const s of sl) { const local = await get('setlists', s.id); if (!todo && local && local.v === s.v) continue; const obj = await fuente.setlist(s.id); await put('setlists', s.id, { ...obj, v: s.v }); }
     } catch (e) { if (esFalloDeRed(e)) return { sinRed: true, ...resumen }; }
-    ultimaSync = { t: Date.now(), n: lista.length }; await kvPut('sync', ultimaSync);
+    ultimaSync = { t: Date.now(), n: lista.length }; await kvPut('sync', ultimaSync); tieneCopia = Promise.resolve(true);
     return resumen;
-  } finally { sincronizando = false; cfg.alCambiar(); }
+  } finally { sincronizando = false; paciente = false; cfg.alCambiar(); }
 }
 
 // ---------- derivados de la copia local (sirven en la Mac, en la nube y sin conexión) ----------

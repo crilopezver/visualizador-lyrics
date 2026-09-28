@@ -14,12 +14,17 @@ export function iniciar(claveBanda) {
   cliente = window.supabase.createClient(cfg().url, cfg().anon, { global: { headers: { 'x-banda': clave } }, auth: { persistSession: false, autoRefreshToken: false } });
   return cliente;
 }
+// Los datos (canciones, setlists, notas, integrantes, banda) van con tiempo límite (datos.js `pedir`, inyectado por la app): una
+// señal colgada cuenta como sin conexión y se trabaja desde la copia. El vivo (estado y PIN) sigue como estaba, sin límite (28-sep).
+const pedirSimple = async (url, o) => { const r = await fetch(url, o); return { ok: r.ok, status: r.status, texto: await r.text() }; };
+let pedirDatos = pedirSimple;
+export function usarRed(f) { pedirDatos = f || pedirSimple; }
 async function rest(ruta, opciones = {}) {
-  let r;
-  try { r = await fetch(`${cfg().url}/rest/v1/${ruta}`, { ...opciones, headers: { apikey: cfg().anon, Authorization: `Bearer ${cfg().anon}`, 'x-banda': clave, 'Content-Type': 'application/json', ...(opciones.headers || {}) } }); }
+  let r; const esVivo = /^(estado|rpc\/)/.test(ruta);
+  try { r = await (esVivo ? pedirSimple : pedirDatos)(`${cfg().url}/rest/v1/${ruta}`, { ...opciones, headers: { apikey: cfg().anon, Authorization: `Bearer ${cfg().anon}`, 'x-banda': clave, 'Content-Type': 'application/json', ...(opciones.headers || {}) } }); }
   catch { const e = new Error('sin conexión'); e.sinRed = true; throw e; }
-  if (!r.ok) { const e = new Error(`nube ${r.status}: ${(await r.text()).slice(0, 160)}`); e.http = r.status; throw e; }
-  const t = await r.text(); return t ? JSON.parse(t) : null;
+  if (!r.ok) { const e = new Error(`nube ${r.status}: ${r.texto.slice(0, 160)}`); e.http = r.status; throw e; }
+  return r.texto ? JSON.parse(r.texto) : null;
 }
 const q = encodeURIComponent;
 const META_RE = /^\{\s*([a-záéíóúñ_]+)\s*:\s*(.*?)\s*\}\s*$/i;
