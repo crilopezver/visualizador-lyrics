@@ -249,6 +249,7 @@ let ultimaPresencia = null; // para anotar en el diagnóstico solo los cambios d
 // Deshacer en la cola (Cristhian, 08-oct): este celular recuerda las últimas 20 colas tal como estaban antes de cada cambio que le llegó
 // (lo haya hecho quien lo haya hecho); "↶ Deshacer" manda la anterior entera con la acción "reemplazar" (regla compartida, cualquier rol con cola).
 let colaAnteriores = [], colaActual = null, colaEsperada = null;
+let ultimaLlamada = null;
 function recordarCola(e) {
   const nueva = (e.siguiente || []).join(',');
   if (colaActual !== null && nueva !== colaActual) {
@@ -267,6 +268,13 @@ function aplicarEstado(e) {
   // presencia visible en el vivo (fila 244, punto 3): quién está conectado ahora, sin ir a "Yo"
   $('#vivo-quienes').textContent = conectado && (e.conectados || []).length ? '👥 ' + e.conectados.map(c => `${c.nombre || '?'}${c.rol === 'director' ? ' (dir.)' : c.rol === 'cantante' ? ' (cant.)' : ''}`).sort().join(' · ') : '';
   estado = e;
+  // llamada al vivo (📡 con tres toques): todos van a la pestaña En vivo y salen de navegación libre; la primera carga solo anota la marca
+  if (ultimaLlamada === null) ultimaLlamada = e.vivo.llamada || 0;
+  else if (e.vivo.llamada && e.vivo.llamada !== ultimaLlamada) {
+    ultimaLlamada = e.vivo.llamada; diag('llamada', 'al vivo');
+    if (modo === 'libre') cambiarModo(puedeMover() ? 'lider' : 'siguiendo', 'llamada');
+    if (e.vivo.por !== clienteId) { irA('vivo'); aviso('te llamaron al vivo'); }
+  }
   if (!Array.isArray(e.historial)) e.historial = [];
   if (!e.propuestas) e.propuestas = {};
   $('#n-siguiente').textContent = e.siguiente.length || '';
@@ -633,12 +641,19 @@ $('#lider-pasar').onclick = () => { if (!estado.siguiente.length) { diag('rechaz
 $('#lider-anterior').onclick = () => { if (!(estado.historial || []).length) { diag('rechazo', 'anterior: sin canción anterior'); return aviso('no hay canción anterior'); } enviar({ tipo: 'siguiente', accion: 'anterior' }); };
 // "Poner esto en vivo para todos" (fila 244, tras Arcadia): quien controla vuelve a escribir la canción y la posición que ve como estado
 // compartido, con versión nueva, para que cualquiera que se haya quedado atrás recargue. Es la salida de emergencia cuando el vivo no se mueve.
+// 📡 un toque: reenvía el vivo (como siempre). Tres toques seguidos (en 1,5 s): además llama a todos a la pestaña En vivo, también a
+// quien esté en navegación libre; se exige insistir para que sea por fuerza mayor (Cristhian, 08-oct). El 2.º toque no manda nada.
+let toquesReenviar = [];
 $('#lider-reenviar').onclick = () => {
   if (!mostrando.id) return aviso('no hay canción en pantalla');
   if (!conectado) return aviso('sin conexión: no se puede reenviar');
-  diag('reenviar', `${mostrando.id} s${mostrando.seccion} f${Number(mostrando.frac || 0).toFixed(2)}`);
-  enviar({ tipo: 'vivo', cancion: mostrando.id, seccion: mostrando.seccion, frac: mostrando.frac || 0, paso: perfil.paso, reenvio: true });
-  aviso('vivo reenviado a todos');
+  const ahora = Date.now(); toquesReenviar = toquesReenviar.filter(t => ahora - t < 1500); toquesReenviar.push(ahora);
+  const n = toquesReenviar.length;
+  if (n === 2) return aviso('otro toque más y llamas a todos a En vivo');
+  const llamar = n >= 3; if (llamar) toquesReenviar = [];
+  diag(llamar ? 'reenviar+llamar' : 'reenviar', `${mostrando.id} s${mostrando.seccion} f${Number(mostrando.frac || 0).toFixed(2)}`);
+  enviar({ tipo: 'vivo', cancion: mostrando.id, seccion: mostrando.seccion, frac: mostrando.frac || 0, paso: perfil.paso, reenvio: true, llamar });
+  aviso(llamar ? 'vivo reenviado y todos llamados a En vivo' : 'vivo reenviado a todos');
 };
 
 // teclado (pedal = teclado Bluetooth) y zonas de toque estilo lector
