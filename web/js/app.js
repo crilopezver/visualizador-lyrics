@@ -246,7 +246,19 @@ function programarReintento() { diag('reintento', `en ${Math.round(reintento)} m
 
 // ---------- estado compartido ----------
 let ultimaPresencia = null; // para anotar en el diagnóstico solo los cambios de quién está conectado (fila 244)
+// Deshacer en la cola (Cristhian, 08-oct): este celular recuerda las últimas 20 colas tal como estaban antes de cada cambio que le llegó
+// (lo haya hecho quien lo haya hecho); "↶ Deshacer" manda la anterior entera con la acción "reemplazar" (regla compartida, cualquier rol con cola).
+let colaAnteriores = [], colaActual = null, colaEsperada = null;
+function recordarCola(e) {
+  const nueva = (e.siguiente || []).join(',');
+  if (colaActual !== null && nueva !== colaActual) {
+    if (colaEsperada === null || nueva !== colaEsperada) { colaAnteriores.push(colaActual); if (colaAnteriores.length > 20) colaAnteriores.shift(); }
+    colaEsperada = null; // llegó el deshacer (no se apila) o cualquier otro cambio
+  }
+  colaActual = nueva;
+}
 function aplicarEstado(e) {
+  recordarCola(e);
   const tonoAntes = mostrando.id ? transpBanda(mostrando.id) : null;
   const cargaAntes = estado.vivo.carga;
   diag('estado', `${(e.vivo || {}).cancion || '-'} s${(e.vivo || {}).seccion || 0} f${Number((e.vivo || {}).frac || 0).toFixed(2)} c${(e.vivo || {}).carga || 0} cola=${(e.siguiente || []).length}${e.version !== undefined ? ' v' + e.version : ''} [${modo}${modo === 'libre' ? ': no se sigue' : ''}]`, 'estado:' + ((e.vivo || {}).cancion || '-')); // cada cambio de canción se anota; las posiciones dentro de la misma se resumen
@@ -313,7 +325,7 @@ function actualizarControles() {
   p.className = 'pill ' + (modo === 'libre' ? 'modo-libre' : lider ? 'modo-lider' : 'modo-siguiendo');
   p.textContent = sinRed ? 'sin conexión · sigues por tu cuenta: ▶▶ pasa tu cola' : modo === 'libre' ? 'navegación libre' : lider ? 'tú controlas el vivo' : conectado ? 'siguiendo al vivo' : 'sin conexión · ' + textoCopia();
   $('#panel-director').hidden = rol !== 'director';
-  $('#siguiente-acciones').hidden = !(rol === 'director' && estado.siguiente.length);
+  $('#siguiente-acciones').hidden = !((rol === 'director' || rol === 'cantante') && estado.siguiente.length); // el cantante también vacía la cola y la guarda (Cristhian, 08-oct)
   $('#ctl-cejilla').style.display = (perfil.cejilla || perfil.instrumento === 'guitarra') ? '' : 'none';
   $('#ctl-tono').classList.toggle('solo-lectura', rol !== 'director');
   $('#btn-tono-orig').hidden = rol !== 'director' || !mostrando.id;
@@ -746,6 +758,7 @@ async function cancionCambiada(id) {
 function renderSiguiente() {
   const ol = $('#lista-siguiente'); ol.innerHTML = '';
   $('#siguiente-vacio').hidden = estado.siguiente.length > 0;
+  $('#siguiente-deshacer-fila').hidden = !(puedeCola() && colaAnteriores.length);
   estado.siguiente.forEach((id, i) => {
     const li = document.createElement('li');
     li.innerHTML = `<div class="info"><div class="t">${esc(titulo(id))}</div><div class="s">${esc(artista(id))}</div></div><div class="acc"></div>`;
@@ -754,8 +767,9 @@ function renderSiguiente() {
     if (puedeMover()) acc.append(boton('▶ Vivo', () => { enviar({ tipo: 'vivo', cancion: id }); enviar({ tipo: 'siguiente', accion: 'quitar', indice: i }); irA('vivo'); }, 'primario'));
     if (puedeCola()) {
       // ⤒ la pone primera ("adelantar", Cristhian, 11-sep); ↑ un puesto; ≡ arrastre libre. Todo va al servidor como "mover".
-      if (i > 0) acc.append(boton('⤒', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: 0 })));
-      if (i > 0) acc.append(boton('↑', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: i - 1 })));
+      // ⤒ 1º: la pone primera (es la que sigue); ↑: un puesto arriba. Con texto porque los íconos se leían al revés en el toque (Cristhian, 08-oct)
+      if (i > 0) acc.append(Object.assign(boton('⤒ 1º', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: 0 })), { title: 'Ponerla primera: es la que sigue' }));
+      if (i > 0) acc.append(Object.assign(boton('↑', () => enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a: i - 1 })), { title: 'Subir un puesto' }));
       acc.append(boton('✕', () => enviar({ tipo: 'siguiente', accion: 'quitar', indice: i })));
       const asa = document.createElement('span'); asa.className = 'agarre'; asa.title = 'Arrastra para mover'; asa.textContent = '≡'; li.prepend(asa);
       arrastrable(li, asa, ol, a => { if (a !== i && a >= 0) enviar({ tipo: 'siguiente', accion: 'mover', indice: i, a }); else renderSiguiente(); });
@@ -766,24 +780,41 @@ function renderSiguiente() {
 }
 // arrastre genérico de un <li> dentro de su lista desde un asa (eventos pointer; mover/soltar en el documento, como en el arreglo, fila 137)
 function arrastrable(li, asa, ol, alSoltar) {
+  // Con el dedo, el arrastre empieza tras una pulsación larga (300 ms quieto); si el dedo se mueve antes, es un deslizamiento y la lista
+  // se desplaza como siempre (Cristhian, 08-oct: el asa confundía deslizar con arrastrar). Con el mouse, arrastra al instante.
   asa.addEventListener('pointerdown', e => {
     if (e.button && e.button !== 0) return;
-    e.preventDefault(); li.classList.add('arrastrando');
-    try { asa.setPointerCapture(e.pointerId); } catch {}
+    const tactil = e.pointerType !== 'mouse'; const x0 = e.clientX, y0 = e.clientY;
+    let activo = false, timer = null;
+    const empezar = () => {
+      activo = true; li.classList.add('arrastrando');
+      try { asa.setPointerCapture(e.pointerId); } catch {}
+      if (tactil && navigator.vibrate) { try { navigator.vibrate(20); } catch {} }
+    };
     const mover = ev => {
-      if (ev.pointerId !== e.pointerId) return; ev.preventDefault();
+      if (ev.pointerId !== e.pointerId) return;
+      if (!activo) { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 8) limpiar(); return; } // se movió antes de tiempo: deslizamiento, no arrastre
+      ev.preventDefault();
       const bajo = document.elementFromPoint(ev.clientX, ev.clientY); const otro = bajo && bajo.closest('li');
       if (!otro || otro === li || otro.parentElement !== ol) return;
       const r = otro.getBoundingClientRect();
       if (ev.clientY < r.top + r.height / 2) otro.before(li); else otro.after(li);
     };
+    const frenarScroll = ev => { if (activo) ev.preventDefault(); }; // mientras se arrastra, el dedo no desplaza la página
+    const limpiar = () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar);
+      document.removeEventListener('touchmove', frenarScroll);
+    };
     const soltar = ev => {
       if (ev && ev.pointerId !== e.pointerId) return;
-      document.removeEventListener('pointermove', mover); document.removeEventListener('pointerup', soltar); document.removeEventListener('pointercancel', soltar);
+      limpiar(); if (!activo) return;
       li.classList.remove('arrastrando'); alSoltar([...ol.children].indexOf(li));
     };
     document.addEventListener('pointermove', mover, { passive: false });
     document.addEventListener('pointerup', soltar); document.addEventListener('pointercancel', soltar);
+    document.addEventListener('touchmove', frenarScroll, { passive: false });
+    if (tactil) timer = setTimeout(empezar, 300); else { e.preventDefault(); empezar(); }
   });
 }
 // Ya tocadas: la más reciente primero. Ver / ▶ Vivo / + Cola; el director puede limpiarla (p. ej. al empezar otro toque).
@@ -805,6 +836,11 @@ function renderHistorial() {
 }
 $('#historial-limpiar').onclick = () => { if (confirm('¿Limpiar el historial de canciones tocadas?')) enviar({ tipo: 'siguiente', accion: 'vaciar-historial' }); };
 $('#siguiente-vaciar').onclick = () => { if (confirm('¿Vaciar la cola?')) enviar({ tipo: 'siguiente', accion: 'vaciar' }); };
+$('#siguiente-deshacer').onclick = () => {
+  const prev = colaAnteriores.pop(); if (prev === undefined) return;
+  colaEsperada = prev; enviar({ tipo: 'siguiente', accion: 'reemplazar', canciones: prev ? prev.split(',') : [] });
+  aviso(prev ? 'cola restaurada al estado anterior' : 'cola vaciada otra vez (así estaba antes)'); renderSiguiente();
+};
 $('#siguiente-guardar').onclick = async () => {
   const nombre = prompt('Nombre del setlist (ej. “Sábado Pueblo Café”):'); if (!nombre) return;
   try { const r = await datos.guardarSetlist(null, { nombre, fecha: new Date().toISOString().slice(0, 10), canciones: estado.siguiente }); aviso(r.pendiente ? 'setlist guardado en este celular · se sube al conectar' : 'setlist guardado'); } catch (e) { aviso('error: ' + e.message); }
@@ -815,11 +851,13 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 function boton(txt, fn, clase = '') { const b = document.createElement('button'); b.textContent = txt; b.onclick = fn; if (clase) b.className = clase; return b; }
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const sinEsp = s => norm(s).replace(/\s+/g, ''); // buscar sin espacios: "gian marco" encuentra "Gianmarco" y al revés (Cristhian, 08-oct)
+// cada palabra escrita debe estar en el título, el artista o el género, en cualquier orden: "angel elefante" encuentra la de Elefante (Cristhian, 08-oct)
+const coincide = (q, ...campos) => { const texto = sinEsp(campos.join(' ')); return q.split(/\s+/).filter(Boolean).every(p => texto.includes(sinEsp(p))); };
 const fechaImportacion = iso => { const [a, m, d] = String(iso).split('-'); return a && m && d ? `${d}-${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][Number(m) - 1] || m}-${a.slice(2)}` : iso; };
 $('#bib-orden').onchange = ev => { prefs.orden = ev.target.value; guardar('prefs', prefs); renderBiblioteca(); };
 function listaBiblioteca() { // la biblioteca tal como se ve: filtrada por el buscador y ordenada según "Ordenar por" (la usan la lista y los ◀ ▶ de la Previa)
   const q = norm($('#buscar').value.trim());
-  const lista = indice.filter(c => !q || sinEsp(c.titulo).includes(sinEsp(q)) || sinEsp(c.artista).includes(sinEsp(q)) || sinEsp(c.genero).includes(sinEsp(q)));
+  const lista = indice.filter(c => !q || coincide(q, c.titulo, c.artista, c.genero));
   // orden: por fecha de importación (última primero; sin fecha al final) y, dentro del mismo día, por hora real de creación del archivo (Cristhian, 18-sep, 7c); por título o por artista (Cristhian, 09-sep)
   const orden = prefs.orden || 'importada'; const sel = $('#bib-orden'); if (sel && sel.value !== orden) sel.value = orden;
   const cmpTexto = (a, b) => norm(a).localeCompare(norm(b), 'es');
@@ -929,7 +967,7 @@ function renderEditorSetlist() {
   const pintarRes = () => {
     const q = norm(buscar.value.trim()); res.innerHTML = '';
     if (!q) return;
-    const lista = indice.filter(x => sinEsp(x.titulo).includes(sinEsp(q)) || sinEsp(x.artista).includes(sinEsp(q))).slice(0, 12);
+    const lista = indice.filter(x => coincide(q, x.titulo, x.artista)).slice(0, 12);
     if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
     for (const x of lista) {
       const li = document.createElement('li');
@@ -1773,7 +1811,7 @@ async function renderMix() {
     const q = norm(buscar.value.trim()); res.innerHTML = '';
     if (!q) return;
     const enMix = new Set(items.filter(x => x.tipo === 'cancion').map(x => x.id));
-    const lista = indice.filter(c => !c.tipo && c.id !== editor.id && (sinEsp(c.titulo).includes(sinEsp(q)) || sinEsp(c.artista).includes(sinEsp(q)))).slice(0, 12);
+    const lista = indice.filter(c => !c.tipo && c.id !== editor.id && coincide(q, c.titulo, c.artista)).slice(0, 12);
     if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
     for (const c of lista) { const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(c.titulo)}${enMix.has(c.id) ? '<span class="n">ya está en el mix</span>' : ''}</div><div class="s">${esc(c.artista || '')}</div></div><div class="acc"></div>`; li.querySelector('.acc').append(boton('+ Agregar', () => agregar(c.id), 'primario')); res.append(li); }
   };
