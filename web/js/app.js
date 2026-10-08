@@ -814,11 +814,12 @@ $('#siguiente-guardar').onclick = async () => {
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function boton(txt, fn, clase = '') { const b = document.createElement('button'); b.textContent = txt; b.onclick = fn; if (clase) b.className = clase; return b; }
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const sinEsp = s => norm(s).replace(/\s+/g, ''); // buscar sin espacios: "gian marco" encuentra "Gianmarco" y al revés (Cristhian, 08-oct)
 const fechaImportacion = iso => { const [a, m, d] = String(iso).split('-'); return a && m && d ? `${d}-${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][Number(m) - 1] || m}-${a.slice(2)}` : iso; };
 $('#bib-orden').onchange = ev => { prefs.orden = ev.target.value; guardar('prefs', prefs); renderBiblioteca(); };
 function listaBiblioteca() { // la biblioteca tal como se ve: filtrada por el buscador y ordenada según "Ordenar por" (la usan la lista y los ◀ ▶ de la Previa)
   const q = norm($('#buscar').value.trim());
-  const lista = indice.filter(c => !q || norm(c.titulo).includes(q) || norm(c.artista).includes(q) || norm(c.genero).includes(q));
+  const lista = indice.filter(c => !q || sinEsp(c.titulo).includes(sinEsp(q)) || sinEsp(c.artista).includes(sinEsp(q)) || sinEsp(c.genero).includes(sinEsp(q)));
   // orden: por fecha de importación (última primero; sin fecha al final) y, dentro del mismo día, por hora real de creación del archivo (Cristhian, 18-sep, 7c); por título o por artista (Cristhian, 09-sep)
   const orden = prefs.orden || 'importada'; const sel = $('#bib-orden'); if (sel && sel.value !== orden) sel.value = orden;
   const cmpTexto = (a, b) => norm(a).localeCompare(norm(b), 'es');
@@ -928,7 +929,7 @@ function renderEditorSetlist() {
   const pintarRes = () => {
     const q = norm(buscar.value.trim()); res.innerHTML = '';
     if (!q) return;
-    const lista = indice.filter(x => norm(x.titulo).includes(q) || norm(x.artista).includes(q)).slice(0, 12);
+    const lista = indice.filter(x => sinEsp(x.titulo).includes(sinEsp(q)) || sinEsp(x.artista).includes(sinEsp(q))).slice(0, 12);
     if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
     for (const x of lista) {
       const li = document.createElement('li');
@@ -1772,7 +1773,7 @@ async function renderMix() {
     const q = norm(buscar.value.trim()); res.innerHTML = '';
     if (!q) return;
     const enMix = new Set(items.filter(x => x.tipo === 'cancion').map(x => x.id));
-    const lista = indice.filter(c => !c.tipo && c.id !== editor.id && (norm(c.titulo).includes(q) || norm(c.artista).includes(q))).slice(0, 12);
+    const lista = indice.filter(c => !c.tipo && c.id !== editor.id && (sinEsp(c.titulo).includes(sinEsp(q)) || sinEsp(c.artista).includes(sinEsp(q)))).slice(0, 12);
     if (!lista.length) { res.innerHTML = '<li class="vacio">Nada con ese nombre.</li>'; return; }
     for (const c of lista) { const li = document.createElement('li'); li.innerHTML = `<div class="info"><div class="t">${esc(c.titulo)}${enMix.has(c.id) ? '<span class="n">ya está en el mix</span>' : ''}</div><div class="s">${esc(c.artista || '')}</div></div><div class="acc"></div>`; li.querySelector('.acc').append(boton('+ Agregar', () => agregar(c.id), 'primario')); res.append(li); }
   };
