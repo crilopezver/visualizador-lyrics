@@ -400,12 +400,31 @@ async function mostrar(id, seccion = 0, { desplazar = true, frac = 0, nueva = fa
   }
 }
 let scrollObjetivo = 0; // destino del último desplazamiento automático (si aún no terminó, los cálculos parten de ahí)
+// Seguir sin saltos (Cristhian, 08-oct): el desplazamiento automático no salta al destino, se desliza hacia él cuadro a cuadro
+// (cada cuadro recorre el 22 % de lo que falta: se asienta en ~250 ms). Cada posición nueva solo cambia el destino. El salto
+// instantáneo queda para el cambio de canción. Si el usuario arrastra o usa la rueda, la animación se suelta.
+let animScroll = null, ultimoArrastre = 0;
+for (const ev of ['touchmove', 'wheel']) window.addEventListener(ev, () => { ultimoArrastre = Date.now(); }, { passive: true });
 function scrollA(top, { instantaneo = false } = {}) {
   scrollObjetivo = top;
   scrollProgramatico = true; clearTimeout(tScrollProg);
-  const lejos = !instantaneo && Math.abs(top - window.scrollY) > window.innerHeight * 0.9;
-  window.scrollTo({ top, behavior: lejos ? 'smooth' : 'auto' });
-  tScrollProg = setTimeout(() => { scrollProgramatico = false; }, lejos ? 1200 : 250);
+  if (instantaneo || document.hidden) { // con la pantalla apagada o la app atrás no hay cuadros de animación: se coloca directo
+    if (animScroll) { cancelAnimationFrame(animScroll); animScroll = null; }
+    window.scrollTo({ top, behavior: 'auto' });
+    tScrollProg = setTimeout(() => { scrollProgramatico = false; }, 250); return;
+  }
+  if (animScroll) return; // ya se está deslizando: solo cambió el destino
+  const fin = () => { animScroll = null; tScrollProg = setTimeout(() => { scrollProgramatico = false; }, 250); };
+  const paso = () => {
+    if (Date.now() - ultimoArrastre < 500) return fin(); // el usuario está arrastrando: no pelear con su dedo
+    const antes = window.scrollY, falta = scrollObjetivo - antes;
+    scrollProgramatico = true; clearTimeout(tScrollProg);
+    if (Math.abs(falta) < 1) { window.scrollTo({ top: scrollObjetivo, behavior: 'auto' }); return fin(); }
+    window.scrollTo({ top: antes + falta * 0.22, behavior: 'auto' });
+    if (Math.abs(window.scrollY - antes) < 0.5 && Math.abs(falta) >= 1) return fin(); // no puede avanzar más (tope de la página)
+    animScroll = requestAnimationFrame(paso);
+  };
+  animScroll = requestAnimationFrame(paso);
 }
 window.addEventListener('scrollend', () => { scrollProgramatico = false; }, { passive: true });
 for (const ev of ['pointerdown', 'touchmove', 'wheel', 'keydown']) window.addEventListener(ev, () => { ultimoGesto = Date.now(); }, { passive: true });
